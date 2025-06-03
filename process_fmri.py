@@ -95,6 +95,197 @@ def process_single_run(args):
     
     logger.info(f"Completed preprocessing for run {run}")
 
+class ContrastCalculator:
+    """Class for calculating and managing statistical contrasts."""
+    
+    def __init__(self, output_dir, logger):
+        self.output_dir = Path(output_dir)
+        self.contrast_dir = self.output_dir / "contrasts"
+        self.contrast_dir.mkdir(exist_ok=True)
+        self.logger = logger
+        
+        # Define standard contrasts for the experimental design
+        self.standard_contrasts = {
+            # Simple contrasts
+            'FearCue_vs_NeutralCue': {
+                'formula': 'a-b',
+                'conditions': ['FearCue', 'NeutralCue'],
+                'description': 'Fear cues > Neutral cues'
+            },
+            'FearImage_vs_NeutralImage': {
+                'formula': 'a-b', 
+                'conditions': ['FearImage', 'NeutralImage'],
+                'description': 'Fear images > Neutral images'
+            },
+            'Fear_vs_Neutral': {
+                'formula': '(a+b)-(c+d)',
+                'conditions': ['FearCue', 'FearImage', 'NeutralCue', 'NeutralImage'],
+                'description': 'Overall Fear > Neutral'
+            },
+            
+            # Phasic vs Sustained threat
+            'Phasic_vs_Sustained': {
+                'formula': '(a+b+c+d)-(e+f+g)',
+                'conditions': ['FearCue', 'NeutralCue', 'FearImage', 'NeutralImage', 'UnknownCue', 'UnknownFear', 'UnknownNeutral'],
+                'description': 'Phasic threat > Sustained threat'
+            },
+            'Sustained_vs_Phasic': {
+                'formula': '(e+f+g)-(a+b+c+d)',
+                'conditions': ['UnknownCue', 'UnknownFear', 'UnknownNeutral', 'FearCue', 'NeutralCue', 'FearImage', 'NeutralImage'],
+                'description': 'Sustained threat > Phasic threat'
+            },
+            
+            # Unknown context contrasts
+            'UnknownFear_vs_UnknownNeutral': {
+                'formula': 'a-b',
+                'conditions': ['UnknownFear', 'UnknownNeutral'],
+                'description': 'Unknown fear outcomes > Unknown neutral outcomes'
+            },
+            
+            # Cue vs Image contrasts
+            'Cues_vs_Images': {
+                'formula': '(a+b)-(c+d)',
+                'conditions': ['FearCue', 'NeutralCue', 'FearImage', 'NeutralImage'], 
+                'description': 'Cue processing > Image processing'
+            },
+            'Images_vs_Cues': {
+                'formula': '(c+d)-(a+b)',
+                'conditions': ['FearImage', 'NeutralImage', 'FearCue', 'NeutralCue'],
+                'description': 'Image processing > Cue processing'
+            },
+            
+            # Threat sensitivity contrasts
+            'Cue_ThreatSensitivity': {
+                'formula': '(a-b)-(c-d)',
+                'conditions': ['FearCue', 'NeutralCue', 'FearImage', 'NeutralImage'],
+                'description': 'Threat sensitivity for cues > images'
+            },
+            'Image_ThreatSensitivity': {
+                'formula': '(c-d)-(a-b)', 
+                'conditions': ['FearImage', 'NeutralImage', 'FearCue', 'NeutralCue'],
+                'description': 'Threat sensitivity for images > cues'
+            }
+        }
+
+    def get_available_conditions(self, glm_file):
+        """Extract available conditions from GLM bucket file."""
+        try:
+            # Run 3dinfo to get brick labels
+            result = subprocess.run(
+                f"3dinfo -label {glm_file}",
+                shell=True, capture_output=True, text=True, check=True
+            )
+            
+            # Parse condition names from brick labels
+            labels = result.stdout.strip().split('|')
+            conditions = []
+            
+            for label in labels:
+                if '#0_Coef' in label:  # Beta coefficient bricks
+                    condition = label.replace('#0_Coef', '')
+                    conditions.append(condition)
+            
+            return conditions
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Error getting conditions from {glm_file}: {e}")
+            return []
+
+    def calculate_contrast(self, subject_id, glm_file, contrast_name, contrast_info):
+        """Calculate a single contrast for a subject."""
+        
+        # Get available conditions
+        available_conditions = self.get_available_conditions(glm_file)
+        required_conditions = contrast_info['conditions']
+        
+        # Check if all required conditions are available
+        missing_conditions = [c for c in required_conditions if c not in available_conditions]
+        if missing_conditions:
+            self.logger.warning(f"Missing conditions for contrast '{contrast_name}': {missing_conditions}")
+            return None
+        
+        # Create output directory for this subject's contrasts
+        subject_contrast_dir = self.contrast_dir / subject_id
+        subject_contrast_dir.mkdir(exist_ok=True)
+        
+        # Build 3dcalc command
+        output_file = subject_contrast_dir / f"{subject_id}_{contrast_name}"
+        
+        # Map conditions to input variables (a, b, c, d, etc.)
+        input_args = []
+        variable_map = {}
+        
+        for i, condition in enumerate(required_conditions):
+            var = chr(ord('a') + i)  # a, b, c, d, ...
+            variable_map[condition] = var
+            input_args.extend([f"-{var}", f"{glm_file}[{condition}#0_Coef]"])
+        
+        # Build the command
+        cmd = [
+            "3dcalc",
+            *input_args,
+            "-expr", f"'{contrast_info['formula']}'",
+            "-prefix", str(output_file)
+        ]
+        
+        # Execute command
+        try:
+            self.logger.info(f"Calculating contrast '{contrast_name}' for {subject_id}")
+            subprocess.run(cmd, check=True, capture_output=True)
+            self.logger.info(f"✓ Contrast '{contrast_name}' completed: {output_file}+orig")
+            return f"{output_file}+orig"
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Error calculating contrast '{contrast_name}': {e}")
+            return None
+
+    def calculate_all_contrasts(self, subject_id, glm_file):
+        """Calculate all standard contrasts for a subject."""
+        
+        if not os.path.exists(glm_file):
+            self.logger.error(f"GLM file not found: {glm_file}")
+            return {}
+        
+        self.logger.info(f"Calculating contrasts for {subject_id}")
+        
+        contrast_results = {}
+        
+        for contrast_name, contrast_info in self.standard_contrasts.items():
+            result = self.calculate_contrast(subject_id, glm_file, contrast_name, contrast_info)
+            if result:
+                contrast_results[contrast_name] = {
+                    'file': result,
+                    'description': contrast_info['description']
+                }
+        
+        # Save contrast information
+        contrast_info_file = self.contrast_dir / subject_id / f"{subject_id}_contrasts.json"
+        with open(contrast_info_file, 'w') as f:
+            json.dump(contrast_results, f, indent=2)
+        
+        self.logger.info(f"✓ Completed {len(contrast_results)} contrasts for {subject_id}")
+        return contrast_results
+
+    def create_custom_contrast(self, subject_id, glm_file, contrast_name, formula, conditions, description="Custom contrast"):
+        """Create a custom contrast with user-defined formula."""
+        
+        custom_contrast_info = {
+            'formula': formula,
+            'conditions': conditions,
+            'description': description
+        }
+        
+        return self.calculate_contrast(subject_id, glm_file, contrast_name, custom_contrast_info)
+
+    def list_available_contrasts(self):
+        """List all available standard contrasts."""
+        self.logger.info("Available standard contrasts:")
+        for name, info in self.standard_contrasts.items():
+            self.logger.info(f"  {name}: {info['description']}")
+            self.logger.info(f"    Formula: {info['formula']}")
+            self.logger.info(f"    Conditions: {', '.join(info['conditions'])}")
+            self.logger.info("")
+
 class FMRIProcessor:
     def __init__(self, data_dir, output_dir):
         self.data_dir = Path(data_dir)
@@ -132,6 +323,9 @@ class FMRIProcessor:
         
         # Set number of processes for parallel processing
         self.n_processes = max(1, multiprocessing.cpu_count() - 1)  # Leave one CPU free
+        
+        # Initialize contrast calculator
+        self.contrast_calculator = ContrastCalculator(self.output_dir, self.logger)
 
     def _setup_directories(self):
         """Setup the directory structure for processing."""
@@ -416,6 +610,11 @@ class FMRIProcessor:
         # Run 3dDeconvolve
         glm_result = self.run_3ddeconvolve(subject_id, timing_files)
         
+        # Calculate contrasts
+        contrast_results = {}
+        if glm_result:
+            contrast_results = self.contrast_calculator.calculate_all_contrasts(subject_id, glm_result)
+        
         # Create AFNI processing script
         script_path = self.create_afni_proc_script(subject_id, timing_files)
         
@@ -424,7 +623,8 @@ class FMRIProcessor:
         return {
             'script_path': script_path,
             'glm_result': glm_result,
-            'timing_files': timing_files
+            'timing_files': timing_files,
+            'contrasts': contrast_results
         }
 
 def main():
