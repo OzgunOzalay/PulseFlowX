@@ -1,0 +1,3 @@
+*+ WARNING: '-stim_times 1' file 'processed_data/glm_results/sub-ALC2158/sub-ALC2158_phasic1_combined.1D' has 1 duplicate and 1 near-duplicate times ???
+*+ WARNING: '-stim_times 2' file 'processed_data/glm_results/sub-ALC2158/sub-ALC2158_phasic2_combined.1D' has 0 duplicate and 5 near-duplicate times ???
+*+ WARNING: '-stim_times 3' file 'processed_data/glm_results/sub-ALC2158/sub-ALC2158_sustained_combined.1D' has 0 duplicate and 3 near-duplicate times ???

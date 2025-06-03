@@ -22,16 +22,16 @@ def process_single_run(args):
     """Process a single run of fMRI data (static function for multiprocessing)."""
     run, subject_id, raw_dir, preproc_dir, qc_dir = args
     
-    # Setup logging for this process
-    logger = logging.getLogger(f"FMRIProcessor_{run}")
+    # Setup logging for this process - simpler approach without Rich
+    logger = logging.getLogger(f"FMRIProcessor_Run{run}")
     logger.setLevel(logging.INFO)
     
-    # Create handlers
-    console_handler = RichHandler(rich_tracebacks=True)
+    # Create console handler without Rich to avoid conflicts
+    console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     
     # Create formatters
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(f'%(asctime)s - Run {run} - %(levelname)s - %(message)s')
     console_handler.setFormatter(formatter)
     
     # Add handlers to logger
@@ -42,11 +42,13 @@ def process_single_run(args):
         logger.warning(f"Input file not found: {input_file}")
         return
     
+    logger.info(f"Starting preprocessing for run {run}")
+    
     # 1. Slice timing correction
     slice_timing_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_tcat.nii"
     cmd = f"3dTcat -prefix {slice_timing_file} {input_file}"
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
         logger.info(f"Slice timing correction completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in slice timing correction for run {run}: {e}")
@@ -56,7 +58,7 @@ def process_single_run(args):
     despiked_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_despiked.nii"
     cmd = f"3dDespike -NEW -prefix {despiked_file} {slice_timing_file}"
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
         logger.info(f"Despiking completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in despiking for run {run}: {e}")
@@ -66,7 +68,7 @@ def process_single_run(args):
     motion_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_motion.nii"
     cmd = f"3dvolreg -prefix {motion_file} -1Dfile {Path(preproc_dir)}/{subject_id}/motion_run{run}.1D -Fourier -twopass -zpad 4 {despiked_file}"
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
         logger.info(f"Motion correction completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in motion correction for run {run}: {e}")
@@ -76,7 +78,7 @@ def process_single_run(args):
     smoothed_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_smoothed.nii"
     cmd = f"3dmerge -1blur_fwhm 4.0 -doall -prefix {smoothed_file} {motion_file}"
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
         logger.info(f"Spatial smoothing completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in spatial smoothing for run {run}: {e}")
@@ -86,10 +88,12 @@ def process_single_run(args):
     qc_file = Path(qc_dir) / subject_id / f"qc_run{run}.png"
     cmd = f"3dTstat -mean -prefix {Path(qc_dir)}/{subject_id}/mean_run{run}.nii {smoothed_file} && 3dTstat -stdev -prefix {Path(qc_dir)}/{subject_id}/std_run{run}.nii {smoothed_file}"
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
         logger.info(f"QC plots generated for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error generating QC plots for run {run}: {e}")
+    
+    logger.info(f"Completed preprocessing for run {run}")
 
 class FMRIProcessor:
     def __init__(self, data_dir, output_dir):
@@ -115,11 +119,15 @@ class FMRIProcessor:
         # Create directory structure
         self._setup_directories()
         
-        # Define condition mappings
+        # Define condition mappings - separate regressor for each condition
         self.condition_mapping = {
-            'phasic1': ['FearCue', 'NeutralCue'],
-            'phasic2': ['FearImage', 'NeutralImage'],
-            'sustained': ['UnknownCue', 'UnknownFear', 'UnknownNeutral']
+            'FearCue': ['FearCue'],
+            'NeutralCue': ['NeutralCue'], 
+            'FearImage': ['FearImage'],
+            'NeutralImage': ['NeutralImage'],
+            'UnknownCue': ['UnknownCue'],
+            'UnknownFear': ['UnknownFear'],
+            'UnknownNeutral': ['UnknownNeutral']
         }
         
         # Set number of processes for parallel processing
@@ -136,10 +144,11 @@ class FMRIProcessor:
         self.scripts_dir = self.output_dir / "scripts"
         self.logs_dir = self.output_dir / "logs"
         self.qc_dir = self.output_dir / "qc"
+        self.glm_dir = self.output_dir / "glm_results"
         
         # Create directories
         for directory in [self.raw_dir, self.preprocessed_dir, self.timing_dir, 
-                         self.scripts_dir, self.logs_dir, self.qc_dir]:
+                         self.scripts_dir, self.logs_dir, self.qc_dir, self.glm_dir]:
             directory.mkdir(parents=True, exist_ok=True)
             
         # Setup log file
@@ -169,11 +178,11 @@ class FMRIProcessor:
         else:
             self.logger.warning(f"Anatomical data not found at {anat_src}")
         
-        # Copy functional data
+        # Copy functional data (only first 4 runs)
         func_dest_dir = subject_raw_dir / "func"
         func_dest_dir.mkdir(exist_ok=True)
         
-        for run in range(1, 6):
+        for run in range(1, 5):  # Changed from range(1, 6) to range(1, 5)
             # Copy BOLD data
             bold_src = self.data_dir / subject_id / "func" / f"{subject_id}_task-unpredictablethreat_run-{run}_bold.nii"
             bold_dest = func_dest_dir / f"{subject_id}_task-unpredictablethreat_run-{run}_bold.nii"
@@ -205,27 +214,20 @@ class FMRIProcessor:
         subject_qc_dir = self.qc_dir / subject_id
         subject_qc_dir.mkdir(exist_ok=True)
         
-        # Prepare arguments for parallel processing
+        # Prepare arguments for parallel processing (only first 4 runs)
         args_list = [
             (run, subject_id, str(self.raw_dir), str(self.preprocessed_dir), str(self.qc_dir))
-            for run in range(1, 6)
+            for run in range(1, 5)  # Changed from range(1, 6) to range(1, 5)
         ]
+        
+        self.console.print(f"[cyan]Processing 4 runs in parallel for {subject_id}...[/cyan]")
         
         # Create a pool of workers
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # Process runs in parallel
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                console=self.console
-            ) as progress:
-                task = progress.add_task("[cyan]Processing runs...", total=5)
-                
-                # Map the runs to the process pool
-                for _ in pool.imap_unordered(process_single_run, args_list):
-                    progress.update(task, advance=1)
+            # Process runs in parallel - simplified without Rich progress bar
+            results = pool.map(process_single_run, args_list)
+        
+        self.console.print(f"[green]✓[/green] Completed preprocessing for {subject_id}")
 
     def process_timing_files(self, subject_id):
         """Process timing files for a single subject."""
@@ -233,53 +235,126 @@ class FMRIProcessor:
         subject_dir = self.raw_dir / subject_id
         timing_files = {}
         
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=self.console
-        ) as progress:
-            task = progress.add_task("[cyan]Processing timing files...", total=5)
+        # Process each run (only first 4 runs)
+        for run in range(1, 5):  # Changed from range(1, 6) to range(1, 5)
+            tsv_file = subject_dir / "func" / f"{subject_id}_task-unpredictablethreat_run-{run}_events.tsv"
+            if not tsv_file.exists():
+                self.logger.warning(f"Warning: {tsv_file} not found")
+                continue
+                
+            # Read TSV file
+            df = pd.read_csv(tsv_file, sep='\t')
             
-            # Process each run
-            for run in range(1, 6):  # 5 runs
-                tsv_file = subject_dir / "func" / f"{subject_id}_task-unpredictablethreat_run-{run}_events.tsv"
-                if not tsv_file.exists():
-                    self.logger.warning(f"Warning: {tsv_file} not found")
-                    progress.update(task, advance=1)
-                    continue
-                    
-                # Read TSV file
-                df = pd.read_csv(tsv_file, sep='\t')
+            # Create timing files for each condition
+            for condition, trial_types in self.condition_mapping.items():
+                # Filter events for this condition
+                mask = df['trial_type'].isin(trial_types)
+                onsets = df[mask]['onset'].values
                 
-                # Create timing files for each condition
-                for condition, trial_types in self.condition_mapping.items():
-                    # Filter events for this condition
-                    mask = df['trial_type'].isin(trial_types)
-                    onsets = df[mask]['onset'].values
-                    
-                    # Create timing file
-                    timing_file = self.timing_dir / f"{subject_id}_run{run}_{condition}.txt"
-                    np.savetxt(timing_file, onsets, fmt='%.3f')
-                    
-                    if condition not in timing_files:
-                        timing_files[condition] = []
-                    timing_files[condition].append(str(timing_file))
+                # Create timing file
+                timing_file = self.timing_dir / f"{subject_id}_run{run}_{condition}.txt"
+                np.savetxt(timing_file, onsets, fmt='%.3f')
                 
-                progress.update(task, advance=1)
+                if condition not in timing_files:
+                    timing_files[condition] = []
+                timing_files[condition].append(str(timing_file))
         
+        self.logger.info(f"Created timing files for {len(timing_files)} conditions")
         return timing_files
+
+    def run_3ddeconvolve(self, subject_id, timing_files):
+        """Run 3dDeconvolve for GLM analysis."""
+        self.logger.info(f"Running 3dDeconvolve for subject {subject_id}")
+        
+        # Setup output directory
+        subject_glm_dir = self.glm_dir / subject_id
+        subject_glm_dir.mkdir(exist_ok=True)
+        
+        # Get preprocessed functional data (only first 4 runs)
+        func_files = []
+        for run in range(1, 5):  # Changed from range(1, 6) to range(1, 5)
+            func_file = self.preprocessed_dir / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_smoothed.nii"
+            if func_file.exists():
+                func_files.append(str(func_file))
+            else:
+                self.logger.warning(f"Preprocessed file not found: {func_file}")
+        
+        if not func_files:
+            self.logger.error(f"No preprocessed functional files found for {subject_id}")
+            return None
+        
+        # Build 3dDeconvolve command
+        output_prefix = subject_glm_dir / f"{subject_id}_glm"
+        
+        cmd = [
+            "3dDeconvolve",
+            "-input", " ".join(func_files),
+            f"-polort 3",  # Polynomial detrending
+            f"-num_stimts {len(timing_files)}",  # Number of stimulus files
+        ]
+        
+        # Add stimulus timing files
+        stim_index = 1
+        for condition, files in timing_files.items():
+            # Combine timing files across runs for each condition
+            combined_timing = subject_glm_dir / f"{subject_id}_{condition}_combined.1D"
+            
+            # Create combined timing file
+            with open(combined_timing, 'w') as f:
+                for i, timing_file in enumerate(files):
+                    if os.path.exists(timing_file):
+                        with open(timing_file, 'r') as tf:
+                            onsets = tf.read().strip()
+                            if onsets:  # Only write if there are onsets
+                                f.write(onsets + " ")
+                    if i < len(files) - 1:
+                        f.write("\n")
+            
+            cmd.extend([
+                f"-stim_times {stim_index} {combined_timing} 'GAM'",
+                f"-stim_label {stim_index} {condition}"
+            ])
+            stim_index += 1
+        
+        # Add output options
+        cmd.extend([
+            f"-fout -tout -x1D {subject_glm_dir}/{subject_id}_X.xmat.1D",
+            f"-xjpeg {subject_glm_dir}/{subject_id}_X.jpg",
+            f"-x1D_uncensored {subject_glm_dir}/{subject_id}_X.nocensor.xmat.1D",
+            f"-fitts {subject_glm_dir}/{subject_id}_fitts",
+            f"-errts {subject_glm_dir}/{subject_id}_errts",
+            f"-bucket {output_prefix}"
+        ])
+        
+        # Execute command
+        full_cmd = " ".join(cmd)
+        self.logger.info(f"Running: {full_cmd}")
+        
+        try:
+            result = subprocess.run(full_cmd, shell=True, check=True, capture_output=True, text=True)
+            self.logger.info(f"3dDeconvolve completed successfully for {subject_id}")
+            
+            # Log some output info
+            if result.stdout:
+                self.logger.info(f"3dDeconvolve output: {result.stdout[:200]}...")
+            
+            return str(output_prefix) + "+orig"
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"3dDeconvolve failed for {subject_id}: {e}")
+            if e.stderr:
+                self.logger.error(f"Error details: {e.stderr}")
+            return None
 
     def create_afni_proc_script(self, subject_id, timing_files):
         """Create AFNI processing script for a subject."""
         self.logger.info(f"Creating AFNI processing script for subject {subject_id}")
         script_path = self.scripts_dir / f"proc_{subject_id}.sh"
         
-        # Get anatomical and functional data paths
+        # Get anatomical and functional data paths (only first 4 runs)
         anat_file = self.raw_dir / subject_id / "anat" / f"{subject_id}_T1w.nii"
         func_files = [str(self.preprocessed_dir / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_smoothed.nii")
-                     for run in range(1, 6)]
+                     for run in range(1, 5)]  # Changed from range(1, 6) to range(1, 5)
         
         # Create AFNI proc command
         cmd = [
@@ -338,15 +413,24 @@ class FMRIProcessor:
         # Process timing files
         timing_files = self.process_timing_files(subject_id)
         
+        # Run 3dDeconvolve
+        glm_result = self.run_3ddeconvolve(subject_id, timing_files)
+        
         # Create AFNI processing script
         script_path = self.create_afni_proc_script(subject_id, timing_files)
         
         self.console.print(f"[bold green]✓[/bold green] Completed processing for subject {subject_id}")
-        return script_path
+        
+        return {
+            'script_path': script_path,
+            'glm_result': glm_result,
+            'timing_files': timing_files
+        }
 
 def main():
     console = Console()
     console.print("[bold blue]Starting FMRI Processing Pipeline[/bold blue]")
+    console.print("[yellow]Processing first 4 runs only[/yellow]")
     
     # Initialize processor
     processor = FMRIProcessor("Data", "processed_data")
@@ -354,11 +438,13 @@ def main():
     # Process test subjects
     test_subjects = ["sub-ALC2158", "sub-ALC2161"]
     
+    results = {}
     for subject in test_subjects:
-        processor.process_subject(subject)
+        results[subject] = processor.process_subject(subject)
     
     console.print("\n[bold green]Pipeline completed successfully![/bold green]")
     console.print(f"Check the logs directory for detailed processing information.")
+    console.print(f"GLM results are in the glm_results directory.")
 
 if __name__ == "__main__":
     main() 
