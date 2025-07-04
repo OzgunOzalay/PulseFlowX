@@ -42,3 +42,41 @@ Thumbs.db
 # Data files
 Data/
 processed_data/
+plots/
+# Large neuroimaging data files
+*.nii
+*.nii.gz
+*.BRIK.gz
+*.HEAD
+
+# Data directories
+Data/
+processed_data/
+
+# Common neuroimaging file extensions
+*.img
+*.hdr
+*.mnc
+*.mgh
+*.mgz
+
+# FSL files
+*.feat/
+
+# SPM files
+*.mat
+*.ps
+
+# FreeSurfer files
+*/?h.curv
+*/?h.inflated
+*/?h.orig
+*/?h.pial
+*/?h.smoothwm
+*/?h.sphere
+*/?h.white
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store

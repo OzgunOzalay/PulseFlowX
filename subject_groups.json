@@ -1,0 +1,14 @@
+{
+  "groups": {
+    "AUD": [
+      "sub-ALC2158",
+      "sub-ALC2132",
+      "sub-ALC2134"
+    ],
+    "HC": [
+      "sub-ALC2161",
+      "sub-ALC2118", 
+      "sub-ALC2131"
+    ]
+  }
+} 

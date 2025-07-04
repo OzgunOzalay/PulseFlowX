@@ -56,13 +56,21 @@ def process_single_run(args):
     
     # 2. Despiking
     despiked_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_despiked.nii"
+    # Try NEW method first, fall back to standard if it fails
     cmd = f"3dDespike -NEW -prefix {despiked_file} {slice_timing_file}"
     try:
         subprocess.run(cmd, shell=True, check=True, capture_output=True)
         logger.info(f"Despiking completed for run {run}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error in despiking for run {run}: {e}")
-        return
+        logger.warning(f"NEW despiking failed for run {run}, trying standard method: {e}")
+        # Fall back to standard despiking
+        cmd = f"3dDespike -prefix {despiked_file} {slice_timing_file}"
+        try:
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            logger.info(f"Standard despiking completed for run {run}")
+        except subprocess.CalledProcessError as e2:
+            logger.error(f"Error in despiking for run {run}: {e2}")
+            return
     
     # 3. Motion correction
     motion_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_motion.nii"
@@ -118,19 +126,19 @@ class ContrastCalculator:
                 'description': 'Fear images > Neutral images'
             },
             'Fear_vs_Neutral': {
-                'formula': '(a+b)-(c+d)',
+                'formula': 'a+b-c-d',
                 'conditions': ['FearCue', 'FearImage', 'NeutralCue', 'NeutralImage'],
                 'description': 'Overall Fear > Neutral'
             },
             
             # Phasic vs Sustained threat
             'Phasic_vs_Sustained': {
-                'formula': '(a+b+c+d)-(e+f+g)',
+                'formula': 'a+b+c+d-e-f-g',
                 'conditions': ['FearCue', 'NeutralCue', 'FearImage', 'NeutralImage', 'UnknownCue', 'UnknownFear', 'UnknownNeutral'],
                 'description': 'Phasic threat > Sustained threat'
             },
             'Sustained_vs_Phasic': {
-                'formula': '(e+f+g)-(a+b+c+d)',
+                'formula': 'e+f+g-a-b-c-d',
                 'conditions': ['UnknownCue', 'UnknownFear', 'UnknownNeutral', 'FearCue', 'NeutralCue', 'FearImage', 'NeutralImage'],
                 'description': 'Sustained threat > Phasic threat'
             },
@@ -144,24 +152,24 @@ class ContrastCalculator:
             
             # Cue vs Image contrasts
             'Cues_vs_Images': {
-                'formula': '(a+b)-(c+d)',
+                'formula': 'a+b-c-d',
                 'conditions': ['FearCue', 'NeutralCue', 'FearImage', 'NeutralImage'], 
                 'description': 'Cue processing > Image processing'
             },
             'Images_vs_Cues': {
-                'formula': '(c+d)-(a+b)',
+                'formula': 'c+d-a-b',
                 'conditions': ['FearImage', 'NeutralImage', 'FearCue', 'NeutralCue'],
                 'description': 'Image processing > Cue processing'
             },
             
             # Threat sensitivity contrasts
             'Cue_ThreatSensitivity': {
-                'formula': '(a-b)-(c-d)',
+                'formula': 'a-b-c+d',
                 'conditions': ['FearCue', 'NeutralCue', 'FearImage', 'NeutralImage'],
                 'description': 'Threat sensitivity for cues > images'
             },
             'Image_ThreatSensitivity': {
-                'formula': '(c-d)-(a-b)', 
+                'formula': 'c-d-a+b', 
                 'conditions': ['FearImage', 'NeutralImage', 'FearCue', 'NeutralCue'],
                 'description': 'Threat sensitivity for images > cues'
             }
@@ -242,8 +250,10 @@ class ContrastCalculator:
     def calculate_all_contrasts(self, subject_id, glm_file):
         """Calculate all standard contrasts for a subject."""
         
-        if not os.path.exists(glm_file):
-            self.logger.error(f"GLM file not found: {glm_file}")
+        # Check for the actual AFNI file with .BRIK.gz extension
+        glm_file_brik = f"{glm_file}.BRIK.gz"
+        if not os.path.exists(glm_file_brik):
+            self.logger.error(f"GLM file not found: {glm_file_brik}")
             return {}
         
         self.logger.info(f"Calculating contrasts for {subject_id}")
@@ -322,7 +332,8 @@ class FMRIProcessor:
         }
         
         # Set number of processes for parallel processing
-        self.n_processes = max(1, multiprocessing.cpu_count() - 1)  # Leave one CPU free
+        # Use fewer processes to avoid resource conflicts with AFNI
+        self.n_processes = min(2, max(1, multiprocessing.cpu_count() // 2))  # Use at most 2 processes
         
         # Initialize contrast calculator
         self.contrast_calculator = ContrastCalculator(self.output_dir, self.logger)
@@ -419,7 +430,15 @@ class FMRIProcessor:
         # Create a pool of workers
         with multiprocessing.Pool(processes=self.n_processes) as pool:
             # Process runs in parallel - simplified without Rich progress bar
-            results = pool.map(process_single_run, args_list)
+            # Add small delay between processes to avoid conflicts
+            import time
+            results = []
+            for args in args_list:
+                results.append(pool.apply_async(process_single_run, (args,)))
+                time.sleep(0.5)  # Small delay between processes
+            
+            # Wait for all processes to complete
+            results = [r.get() for r in results]
         
         self.console.print(f"[green]✓[/green] Completed preprocessing for {subject_id}")
 
@@ -505,7 +524,7 @@ class FMRIProcessor:
                         f.write("\n")
             
             cmd.extend([
-                f"-stim_times {stim_index} {combined_timing} 'GAM'",
+                f"-stim_times {stim_index} {combined_timing} 'TENT(0,20,11)'",
                 f"-stim_label {stim_index} {condition}"
             ])
             stim_index += 1
@@ -525,15 +544,31 @@ class FMRIProcessor:
         self.logger.info(f"Running: {full_cmd}")
         
         try:
-            result = subprocess.run(full_cmd, shell=True, check=True, capture_output=True, text=True)
+            # Run 3dDeconvolve with timeout and progress monitoring
+            self.logger.info(f"Starting 3dDeconvolve for {subject_id} (this may take 15-30 minutes)...")
+            
+            # Use timeout to prevent infinite hanging
+            result = subprocess.run(
+                full_cmd, 
+                shell=True, 
+                check=True, 
+                capture_output=True, 
+                text=True,
+                timeout=3600  # 1 hour timeout
+            )
+            
             self.logger.info(f"3dDeconvolve completed successfully for {subject_id}")
             
             # Log some output info
             if result.stdout:
                 self.logger.info(f"3dDeconvolve output: {result.stdout[:200]}...")
             
-            return str(output_prefix) + "+orig"
+            # Return the path without +orig suffix since AFNI will add it
+            return str(output_prefix)
             
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"3dDeconvolve timed out for {subject_id} after 1 hour")
+            return None
         except subprocess.CalledProcessError as e:
             self.logger.error(f"3dDeconvolve failed for {subject_id}: {e}")
             if e.stderr:
@@ -576,7 +611,7 @@ class FMRIProcessor:
         
         # Add remaining options
         cmd.extend([
-            "-regress_basis 'GAM'",
+            "-regress_basis 'TENT(0,20,11)'",
             "-regress_opts_3dD -jobs 8",
             "-regress_make_ideal_sum sum_ideal.1D",
             "-regress_est_blur_epits",
@@ -613,7 +648,15 @@ class FMRIProcessor:
         # Calculate contrasts
         contrast_results = {}
         if glm_result:
-            contrast_results = self.contrast_calculator.calculate_all_contrasts(subject_id, glm_result)
+            # Check for GLM file with proper AFNI extension
+            glm_file_with_ext = f"{glm_result}+orig"
+            glm_file_brik = f"{glm_result}+orig.BRIK.gz"
+            
+            # Check if the actual AFNI file exists
+            if os.path.exists(glm_file_brik):
+                contrast_results = self.contrast_calculator.calculate_all_contrasts(subject_id, glm_file_with_ext)
+            else:
+                self.logger.warning(f"GLM file not found: {glm_file_brik}")
         
         # Create AFNI processing script
         script_path = self.create_afni_proc_script(subject_id, timing_files)
@@ -628,15 +671,37 @@ class FMRIProcessor:
         }
 
 def main():
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="FMRI Processing Pipeline")
+    parser.add_argument("--subject", type=str, help="Process specific subject only")
+    parser.add_argument("--data_dir", type=str, default="Data", help="Input data directory")
+    parser.add_argument("--output_dir", type=str, default="processed_data", help="Output directory")
+    parser.add_argument("--no_parallel", action="store_true", help="Disable parallel processing")
+    args = parser.parse_args()
+    
     console = Console()
     console.print("[bold blue]Starting FMRI Processing Pipeline[/bold blue]")
     console.print("[yellow]Processing first 4 runs only[/yellow]")
     
     # Initialize processor
-    processor = FMRIProcessor("Data", "processed_data")
+    processor = FMRIProcessor(args.data_dir, args.output_dir)
     
-    # Process test subjects
-    test_subjects = ["sub-ALC2158", "sub-ALC2161"]
+    # Override parallel processing if requested
+    if args.no_parallel:
+        processor.n_processes = 1
+        console.print("[yellow]Parallel processing disabled[/yellow]")
+    
+    # Determine subjects to process
+    if args.subject:
+        # Process only the specified subject
+        test_subjects = [args.subject]
+        console.print(f"[cyan]Processing single subject: {args.subject}[/cyan]")
+    else:
+        # Process all test subjects
+        test_subjects = ["sub-ALC2158", "sub-ALC2161", "sub-ALC2118", "sub-ALC2131", "sub-ALC2132", "sub-ALC2134"]
+        console.print(f"[cyan]Processing all subjects: {', '.join(test_subjects)}[/cyan]")
     
     results = {}
     for subject in test_subjects:

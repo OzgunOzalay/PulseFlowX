@@ -1,6 +1,6 @@
-# FMRI Processing Pipeline
+# HRF-Deconvolution: FMRI Processing Pipeline
 
-This pipeline processes fMRI data using AFNI tools, implementing a comprehensive preprocessing and analysis workflow.
+This pipeline processes fMRI data using AFNI tools, implementing a comprehensive preprocessing and analysis workflow for threat processing studies in Alcohol Use Disorder (AUD) vs Healthy Controls (HC).
 
 ## Features
 
@@ -14,6 +14,10 @@ This pipeline processes fMRI data using AFNI tools, implementing a comprehensive
 - AFNI processing script generation
 - Detailed logging and progress tracking
 - Quality control visualization
+- **Sustained vs Phasic Response Analysis** using TENT basis functions
+- **Group Analysis** for AUD vs HC comparisons
+- **Flexible Group Management** via JSON configuration
+- **Automated Contrast Calculations** for threat processing conditions
 
 ## Directory Structure
 
@@ -24,7 +28,17 @@ processed_data/
 ├── timing_files/          # Timing files for analysis
 ├── scripts/               # AFNI processing scripts
 ├── logs/                  # Processing logs
-└── qc/                    # Quality control outputs
+├── qc/                    # Quality control outputs
+└── sustained_phasic_analysis/  # Sustained/phasic response analysis
+    ├── sub-*/             # Individual subject results
+    │   ├── sustained/     # Sustained response components
+    │   └── phasic/        # Phasic response components
+    └── group_analysis/    # Group-level results
+
+plots/
+├── hrf_analysis/          # HRF analysis visualizations
+├── timeseries/            # Time series plots
+└── sustained_phasic/      # Sustained/phasic analysis plots
 ```
 
 ## Requirements
@@ -65,9 +79,34 @@ Data/
     └── ...
 ```
 
-2. Run the pipeline:
+2. **Configure Group Assignments** (for sustained/phasic analysis):
+```bash
+# View current group assignments
+python manage_groups.py --list
+
+# List all available subjects
+python manage_groups.py --subjects
+
+# Add a subject to a group
+python manage_groups.py --add sub-ALC2158 AUD
+
+# Remove a subject from a group
+python manage_groups.py --remove sub-ALC2158 HC
+```
+
+3. Run the preprocessing pipeline:
 ```bash
 python process_fmri.py
+```
+
+4. Run the sustained/phasic analysis:
+```bash
+python sustained_phasic_analysis.py
+```
+
+5. Generate visualizations:
+```bash
+python plot_sustained_phasic_results.py
 ```
 
 ## Processing Steps
@@ -112,6 +151,27 @@ For each subject, the pipeline generates:
 - Console output with progress bars and color-coded status
 - Detailed logs in the `logs` directory
 - Error tracking and reporting
+
+## Group Configuration
+
+The pipeline uses a JSON file (`subject_groups.json`) to manage subject group assignments:
+
+```json
+{
+  "groups": {
+    "AUD": ["sub-ALC2158", "sub-ALC2118", ...],
+    "HC": ["sub-ALC2161", ...]
+  },
+  "metadata": {
+    "description": "Subject group assignments for AUD vs HC analysis",
+    "total_subjects": 6,
+    "aud_count": 5,
+    "hc_count": 1
+  }
+}
+```
+
+You can edit this file directly or use the `manage_groups.py` utility script.
 
 ## Quality Control
 
