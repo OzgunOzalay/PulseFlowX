@@ -117,7 +117,7 @@ class SustainedPhasicAnalyzer:
                 
                 # Use 3dcalc to extract the coefficient
                 temp_file = output_dir / f"temp_{condition}_tent{tent_idx}"
-                cmd = f"3dcalc -a '{glm_file}[{subbrick}]' -expr 'a' -prefix {temp_file}"
+                cmd = f"3dcalc -a '{glm_file}[{subbrick}]' -expr a -prefix {temp_file}"
                 
                 try:
                     result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)

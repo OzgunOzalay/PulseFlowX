@@ -35,16 +35,18 @@ Compare patterns of threat processing between Alcohol Use Disorder (AUD) patient
 
 #### **1. Main Processing Pipeline** (`process_fmri.py`)
 - **Preprocessing**: Slice timing, despiking, motion correction, spatial smoothing
-- **GLM Analysis**: 3dDeconvolve with separate regressors for each condition
-- **Parallel Processing**: Optimized for multi-core execution
-- **Automated Contrast Calculation**: Integrated contrast computation
+- **GLM Analysis**: 3dDeconvolve with separate regressors for each condition (8 parallel jobs)
+- **Parallel Processing**: Optimized for multi-core execution with environment variables
+- **Automated Contrast Calculation**: Integrated contrast computation with **fixed 3dcalc syntax**
 - **Quality Control**: Motion parameters and QC images
+- **Memory Management**: Sequential/parallel processing options with automatic cleanup
 
-#### **2. Contrast Calculator** (`contrast_calculator.py`)
+#### **2. Contrast Calculator** (Integrated in `process_fmri.py`)
 - **10 Standard Contrasts** predefined for experimental design
+- **Fixed 3dcalc Syntax** - resolved expression parsing errors
 - **Custom Contrast Creation** capability
 - **Batch Processing** for multiple subjects
-- **Standalone Usage** independent of main pipeline
+- **JSON Metadata Tracking** for all contrast files
 
 #### **3. Directory Structure**
 ```
@@ -53,6 +55,9 @@ processed_data/
 ├── preprocessed/          # Intermediate preprocessing files
 ├── glm_results/          # Statistical analysis outputs
 ├── contrasts/            # Contrast maps for each subject
+│   └── [subject]/
+│       ├── [contrast_name]+orig.*  # Individual contrast files
+│       └── [subject]_contrasts.json # Contrast metadata
 ├── timing_files/         # Experimental condition timing
 ├── qc/                   # Quality control outputs
 ├── scripts/              # Generated AFNI scripts
@@ -116,27 +121,31 @@ python process_fmri.py
 
 ### **Calculate Contrasts Only** (for existing GLM results)
 ```bash
-# List available contrasts
-python contrast_calculator.py --list_contrasts
-
-# Process all subjects
-python contrast_calculator.py --glm_dir processed_data/glm_results --output_dir processed_data
-
-# Process specific subjects
-python contrast_calculator.py --glm_dir processed_data/glm_results --output_dir processed_data --subjects sub-ALC2158 sub-ALC2161
+# Contrasts are automatically calculated during pipeline execution
+# To recalculate contrasts for existing GLM results:
+python3 -c "
+from process_fmri import ContrastCalculator
+import logging
+logger = logging.getLogger('test')
+calc = ContrastCalculator('processed_data', logger)
+result = calc.calculate_all_contrasts('sub-ALC2158', 'processed_data/glm_results/sub-ALC2158/sub-ALC2158_glm+orig')
+print(f'Completed {len(result)} contrasts')
+"
 ```
 
 ### **Create Custom Contrasts**
 ```python
-from contrast_calculator import ContrastCalculator
+from process_fmri import ContrastCalculator
+import logging
 
-calculator = ContrastCalculator("processed_data")
+logger = logging.getLogger('test')
+calculator = ContrastCalculator("processed_data", logger)
 calculator.create_custom_contrast(
-    subject_id="sub-001",
-    glm_file="path/to/glm+orig",
+    subject_id="sub-ALC2158",
+    glm_file="processed_data/glm_results/sub-ALC2158/sub-ALC2158_glm+orig",
     contrast_name="MyCustomContrast",
     formula="a-b",
-    conditions=["ConditionA", "ConditionB"],
+    conditions=["FearCue", "NeutralCue"],
     description="Custom contrast description"
 )
 ```
@@ -149,8 +158,9 @@ calculator.create_custom_contrast(
 ### **Available Data**:
 - ✅ Preprocessed functional data (4 runs each)
 - ✅ GLM statistical maps (7 conditions)
-- ✅ 10 contrast maps per subject
+- ✅ **10 contrast maps per subject** (all working correctly)
 - ✅ Motion parameters and QC metrics
+- ✅ **Contrast metadata in JSON format**
 
 ### **Key Files to Examine**:
 - `processed_data/glm_results/sub-ALC2158/sub-ALC2158_glm+orig.*`
@@ -214,6 +224,8 @@ calculator.create_custom_contrast(
 - **Progress Bar Conflicts**: Resolved by using simplified logging in parallel processes
 - **Pickling Errors**: Fixed by using standalone functions for multiprocessing
 - **Combined Conditions**: Resolved by creating separate regressors for proper contrasts
+- **Contrast Calculation Errors**: **FIXED** - Resolved 3dcalc expression syntax issues
+- **Memory Management**: Added sequential/parallel processing options with automatic cleanup
 
 ---
 
@@ -257,7 +269,8 @@ Data/
 **Current Repository**: `https://github.com/OzgunOzalay/HRF-Deconvolution.git`
 
 **Key Commits**:
-- Latest: Comprehensive contrast calculation tools
+- Latest: **Fixed contrast calculation syntax** - resolved 3dcalc expression errors
+- Previous: Comprehensive contrast calculation tools
 - Previous: Improved GLM design with separate regressors
 - Previous: Parallelized preprocessing pipeline
 
@@ -267,13 +280,15 @@ Data/
 
 ## 📞 **Contact & Notes**
 
-**Project Status**: ✅ **Pipeline Operational - Ready for ROI Analysis**
+**Project Status**: ✅ **Pipeline Fully Operational - All Components Working**
 
 **Current Focus**: Moving from single-subject GLM analysis to group-level comparisons and ROI extraction.
+
+**Latest Fix**: **Contrast calculation errors resolved** - all 10 standard contrasts now compute successfully.
 
 **Next Session**: Start with ROI definition and extraction tools to enable AUD vs HC group comparisons.
 
 ---
 
-*Last Updated: June 2, 2025*
-*Pipeline Version: 1.0 - Automated Contrast Calculation* 
+*Last Updated: July 6, 2025*
+*Pipeline Version: 1.1 - Fixed Contrast Calculation Syntax* 

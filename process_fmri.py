@@ -22,6 +22,19 @@ def process_single_run(args):
     """Process a single run of fMRI data (static function for multiprocessing)."""
     run, subject_id, raw_dir, preproc_dir, qc_dir = args
     
+    # Set OpenMP threads for AFNI multi-threading
+    os.environ['OMP_NUM_THREADS'] = '8'  # Use 8 threads for AFNI commands
+    os.environ['OMP_THREAD_LIMIT'] = '8'  # Limit OpenMP threads
+    
+    # Enable AFNI CPU clock for multi-threading
+    os.environ['AFNI_CPU_CLOCK'] = 'YES'
+    
+    # Enable OpenCL for AFNI if available (speeds up many operations)
+    os.environ['AFNI_OPENCL'] = 'YES'
+    
+    # Set AFNI-specific threading
+    os.environ['AFNI_NUM_THREADS'] = '8'
+    
     # Setup logging for this process - simpler approach without Rich
     logger = logging.getLogger(f"FMRIProcessor_Run{run}")
     logger.setLevel(logging.INFO)
@@ -46,62 +59,133 @@ def process_single_run(args):
     
     # 1. Slice timing correction
     slice_timing_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_tcat.nii"
-    cmd = f"3dTcat -prefix {slice_timing_file} {input_file}"
+    cmd = ["3dTcat", "-prefix", str(slice_timing_file), str(input_file)]
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=300)
         logger.info(f"Slice timing correction completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in slice timing correction for run {run}: {e}")
+        if e.stderr:
+            logger.error(f"Slice timing stderr: {e.stderr}")
+        return
+    except subprocess.TimeoutExpired:
+        logger.error(f"Slice timing correction timed out for run {run}")
         return
     
     # 2. Despiking
     despiked_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_despiked.nii"
+    
     # Try NEW method first, fall back to standard if it fails
-    cmd = f"3dDespike -NEW -prefix {despiked_file} {slice_timing_file}"
+    cmd = ["3dDespike", "-NEW", "-prefix", str(despiked_file), str(slice_timing_file)]
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
-        logger.info(f"Despiking completed for run {run}")
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=300)  # 5 minute timeout
+        logger.info(f"NEW despiking completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.warning(f"NEW despiking failed for run {run}, trying standard method: {e}")
+        if e.stderr:
+            logger.warning(f"NEW despiking stderr: {e.stderr}")
+        
         # Fall back to standard despiking
-        cmd = f"3dDespike -prefix {despiked_file} {slice_timing_file}"
+        cmd = ["3dDespike", "-prefix", str(despiked_file), str(slice_timing_file)]
         try:
-            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)  # 10 minute timeout
             logger.info(f"Standard despiking completed for run {run}")
         except subprocess.CalledProcessError as e2:
             logger.error(f"Error in despiking for run {run}: {e2}")
+            if e2.stderr:
+                logger.error(f"Standard despiking stderr: {e2.stderr}")
             return
+        except subprocess.TimeoutExpired:
+            logger.error(f"Standard despiking timed out for run {run}")
+            return
+    except subprocess.TimeoutExpired:
+        logger.error(f"NEW despiking timed out for run {run}")
+        return
     
-    # 3. Motion correction
+    # 3. Motion correction (single-threaded - 3dvolreg is not OpenCL compatible)
     motion_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_motion.nii"
-    cmd = f"3dvolreg -prefix {motion_file} -1Dfile {Path(preproc_dir)}/{subject_id}/motion_run{run}.1D -Fourier -twopass -zpad 4 {despiked_file}"
+    motion_param_file = Path(preproc_dir) / subject_id / f"motion_run{run}.1D"
+    
+    # Note: 3dvolreg runs on single core regardless of threading settings
+    cmd = [
+        "3dvolreg", 
+        "-prefix", str(motion_file), 
+        "-1Dfile", str(motion_param_file), 
+        "-Fourier", 
+        "-twopass", 
+        "-zpad", "4",
+        "-maxite", "100",  # Limit iterations for speed
+        str(despiked_file)
+    ]
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        logger.info(f"Starting motion correction for run {run} (single-threaded - 3dvolreg limitation)")
+        logger.info(f"  Note: 3dvolreg is not OpenCL compatible and runs on single core")
+        logger.info(f"  Other steps (despiking, smoothing, GLM) will use multi-threading")
+        
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info(f"Motion correction completed for run {run}")
+            
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in motion correction for run {run}: {e}")
+        if e.stderr:
+            logger.error(f"Motion correction stderr: {e.stderr}")
+        return
+    except subprocess.TimeoutExpired:
+        logger.error(f"Motion correction timed out for run {run}")
         return
     
     # 4. Spatial smoothing
     smoothed_file = Path(preproc_dir) / subject_id / f"{subject_id}_task-unpredictablethreat_run-{run}_smoothed.nii"
-    cmd = f"3dmerge -1blur_fwhm 4.0 -doall -prefix {smoothed_file} {motion_file}"
+    cmd = ["3dmerge", "-1blur_fwhm", "4.0", "-doall", "-prefix", str(smoothed_file), str(motion_file)]
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=300)
         logger.info(f"Spatial smoothing completed for run {run}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in spatial smoothing for run {run}: {e}")
+        if e.stderr:
+            logger.error(f"Spatial smoothing stderr: {e.stderr}")
+        return
+    except subprocess.TimeoutExpired:
+        logger.error(f"Spatial smoothing timed out for run {run}")
         return
     
     # 5. Generate QC plots
-    qc_file = Path(qc_dir) / subject_id / f"qc_run{run}.png"
-    cmd = f"3dTstat -mean -prefix {Path(qc_dir)}/{subject_id}/mean_run{run}.nii {smoothed_file} && 3dTstat -stdev -prefix {Path(qc_dir)}/{subject_id}/std_run{run}.nii {smoothed_file}"
+    mean_file = Path(qc_dir) / subject_id / f"mean_run{run}.nii"
+    std_file = Path(qc_dir) / subject_id / f"std_run{run}.nii"
+    
+    # Generate mean image
+    cmd_mean = ["3dTstat", "-mean", "-prefix", str(mean_file), str(smoothed_file)]
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
-        logger.info(f"QC plots generated for run {run}")
+        result = subprocess.run(cmd_mean, check=True, capture_output=True, text=True, timeout=300)
+        logger.info(f"Mean QC image generated for run {run}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error generating QC plots for run {run}: {e}")
+        logger.error(f"Error generating mean QC image for run {run}: {e}")
+        if e.stderr:
+            logger.error(f"Mean QC stderr: {e.stderr}")
+    
+    # Generate standard deviation image
+    cmd_std = ["3dTstat", "-stdev", "-prefix", str(std_file), str(smoothed_file)]
+    try:
+        result = subprocess.run(cmd_std, check=True, capture_output=True, text=True, timeout=300)
+        logger.info(f"Standard deviation QC image generated for run {run}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error generating std QC image for run {run}: {e}")
+        if e.stderr:
+            logger.error(f"Std QC stderr: {e.stderr}")
     
     logger.info(f"Completed preprocessing for run {run}")
+
+def process_single_subject(args):
+    """Process a single subject's data (static function for multiprocessing)."""
+    data_dir, output_dir, subject_id = args
+    
+    # Create a new processor instance for this process
+    processor = FMRIProcessor(data_dir, output_dir)
+    
+    # Process the subject
+    result = processor.process_subject(subject_id)
+    
+    return result
 
 class ContrastCalculator:
     """Class for calculating and managing statistical contrasts."""
@@ -232,7 +316,7 @@ class ContrastCalculator:
         cmd = [
             "3dcalc",
             *input_args,
-            "-expr", f"'{contrast_info['formula']}'",
+            "-expr", contrast_info['formula'],
             "-prefix", str(output_file)
         ]
         
@@ -332,8 +416,9 @@ class FMRIProcessor:
         }
         
         # Set number of processes for parallel processing
-        # Use fewer processes to avoid resource conflicts with AFNI
-        self.n_processes = min(2, max(1, multiprocessing.cpu_count() // 2))  # Use at most 2 processes
+        # Use 4 threads for faster processing while avoiding resource conflicts
+        self.n_processes = min(4, max(1, multiprocessing.cpu_count()))  # Use 4 threads
+        self.logger.info(f"Parallel processing configured for {self.n_processes} threads")
         
         # Initialize contrast calculator
         self.contrast_calculator = ContrastCalculator(self.output_dir, self.logger)
@@ -364,6 +449,7 @@ class FMRIProcessor:
         file_handler = logging.FileHandler(self.log_file)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(file_handler)
+
 
     def _copy_raw_data(self, subject_id):
         """Copy raw data to processing directory."""
@@ -425,20 +511,14 @@ class FMRIProcessor:
             for run in range(1, 5)  # Changed from range(1, 6) to range(1, 5)
         ]
         
+        # Process runs in parallel within each subject
         self.console.print(f"[cyan]Processing 4 runs in parallel for {subject_id}...[/cyan]")
         
-        # Create a pool of workers
-        with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # Process runs in parallel - simplified without Rich progress bar
-            # Add small delay between processes to avoid conflicts
-            import time
-            results = []
-            for args in args_list:
-                results.append(pool.apply_async(process_single_run, (args,)))
-                time.sleep(0.5)  # Small delay between processes
-            
-            # Wait for all processes to complete
-            results = [r.get() for r in results]
+        # Use ThreadPoolExecutor instead of multiprocessing to avoid daemonic process issues
+        from concurrent.futures import ThreadPoolExecutor
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(process_single_run, args_list))
         
         self.console.print(f"[green]✓[/green] Completed preprocessing for {subject_id}")
 
@@ -477,7 +557,7 @@ class FMRIProcessor:
 
     def run_3ddeconvolve(self, subject_id, timing_files):
         """Run 3dDeconvolve for GLM analysis."""
-        self.logger.info(f"Running 3dDeconvolve for subject {subject_id}")
+        self.logger.info(f"Running 3dDeconvolve for subject {subject_id} with 8 parallel jobs")
         
         # Setup output directory
         subject_glm_dir = self.glm_dir / subject_id
@@ -504,6 +584,7 @@ class FMRIProcessor:
             "-input", " ".join(func_files),
             f"-polort 3",  # Polynomial detrending
             f"-num_stimts {len(timing_files)}",  # Number of stimulus files
+            "-jobs 8",  # Use 8 parallel jobs for faster processing
         ]
         
         # Add stimulus timing files
@@ -547,6 +628,13 @@ class FMRIProcessor:
             # Run 3dDeconvolve with timeout and progress monitoring
             self.logger.info(f"Starting 3dDeconvolve for {subject_id} (this may take 15-30 minutes)...")
             
+            # Set environment variables for this subprocess
+            env = os.environ.copy()
+            env['OMP_NUM_THREADS'] = '8'
+            env['AFNI_CPU_CLOCK'] = 'YES'
+            env['AFNI_OPENCL'] = 'YES'
+            env['AFNI_NUM_THREADS'] = '8'
+            
             # Use timeout to prevent infinite hanging
             result = subprocess.run(
                 full_cmd, 
@@ -554,6 +642,7 @@ class FMRIProcessor:
                 check=True, 
                 capture_output=True, 
                 text=True,
+                env=env,
                 timeout=3600  # 1 hour timeout
             )
             
@@ -612,7 +701,7 @@ class FMRIProcessor:
         # Add remaining options
         cmd.extend([
             "-regress_basis 'TENT(0,20,11)'",
-            "-regress_opts_3dD -jobs 8",
+            "-regress_opts_3dD -jobs 1",  # Use single thread to reduce memory usage
             "-regress_make_ideal_sum sum_ideal.1D",
             "-regress_est_blur_epits",
             "-regress_est_blur_errts"
@@ -678,7 +767,12 @@ def main():
     parser.add_argument("--subject", type=str, help="Process specific subject only")
     parser.add_argument("--data_dir", type=str, default="Data", help="Input data directory")
     parser.add_argument("--output_dir", type=str, default="processed_data", help="Output directory")
-    parser.add_argument("--no_parallel", action="store_true", help="Disable parallel processing")
+    parser.add_argument("--sequential", action="store_true", help="Process subjects sequentially (default: True)")
+    parser.add_argument("--parallel", action="store_true", help="Enable parallel processing (use with caution)")
+    parser.add_argument("--threads", type=int, default=1, help="Number of threads to use for parallel processing (default: 1)")
+
+
+
     args = parser.parse_args()
     
     console = Console()
@@ -688,10 +782,18 @@ def main():
     # Initialize processor
     processor = FMRIProcessor(args.data_dir, args.output_dir)
     
-    # Override parallel processing if requested
-    if args.no_parallel:
+    # Determine processing mode
+    if args.parallel:
+        # Parallel processing mode
+        processor.n_processes = min(args.threads, multiprocessing.cpu_count())
+        console.print(f"[yellow]⚠️  WARNING: Parallel processing enabled with {processor.n_processes} threads[/yellow]")
+        console.print("[yellow]This may use significant memory. Consider using --sequential for memory-constrained systems.[/yellow]")
+        processing_mode = "parallel"
+    else:
+        # Sequential processing mode (default)
         processor.n_processes = 1
-        console.print("[yellow]Parallel processing disabled[/yellow]")
+        console.print("[green]✓ Sequential processing enabled (memory-efficient)[/green]")
+        processing_mode = "sequential"
     
     # Determine subjects to process
     if args.subject:
@@ -703,9 +805,37 @@ def main():
         test_subjects = ["sub-ALC2158", "sub-ALC2161", "sub-ALC2118", "sub-ALC2131", "sub-ALC2132", "sub-ALC2134"]
         console.print(f"[cyan]Processing all subjects: {', '.join(test_subjects)}[/cyan]")
     
-    results = {}
-    for subject in test_subjects:
-        results[subject] = processor.process_subject(subject)
+    # Process subjects
+    if processing_mode == "parallel":
+        console.print(f"[cyan]Processing {len(test_subjects)} subjects in parallel using {processor.n_processes} threads...[/cyan]")
+        
+        # Prepare arguments for parallel processing
+        args_list = [(args.data_dir, args.output_dir, subject) for subject in test_subjects]
+        
+        # Create a pool for subject-level parallel processing
+        with multiprocessing.Pool(processes=processor.n_processes) as pool:
+            # Process subjects in parallel
+            subject_results = pool.map(process_single_subject, args_list)
+            
+            # Combine results
+            results = dict(zip(test_subjects, subject_results))
+    else:
+        # Sequential processing
+        console.print(f"[cyan]Processing {len(test_subjects)} subjects sequentially...[/cyan]")
+        
+        results = {}
+        for i, subject in enumerate(test_subjects, 1):
+            console.print(f"\n[bold cyan]Processing subject {i}/{len(test_subjects)}: {subject}[/bold cyan]")
+            
+            # Process single subject
+            result = process_single_subject((args.data_dir, args.output_dir, subject))
+            results[subject] = result
+            
+            # Clear memory after each subject
+            import gc
+            gc.collect()
+            
+            console.print(f"[green]✓ Completed subject {i}/{len(test_subjects)}: {subject}[/green]")
     
     console.print("\n[bold green]Pipeline completed successfully![/bold green]")
     console.print(f"Check the logs directory for detailed processing information.")
