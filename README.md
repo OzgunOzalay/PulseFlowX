@@ -1,4 +1,18 @@
+<div align="center">
+  <img src="PulseFlowX.png" alt="PulseFlowX Logo" width="400"/>
+</div>
+
 # PulseFlowX: Advanced fMRI Threat Processing Pipeline
+
+<div align="center">
+
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![AFNI](https://img.shields.io/badge/AFNI-23.0+-green.svg)](https://afni.nimh.nih.gov/)
+[![fMRI](https://img.shields.io/badge/Analysis-fMRI-purple.svg)](https://en.wikipedia.org/wiki/Functional_magnetic_resonance_imaging)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+</div>
 
 **PulseFlowX** is a comprehensive AFNI-based pipeline for analyzing sustained and phasic threat responses in fMRI data, with advanced group comparisons between Alcohol Use Disorder (AUD) and Healthy Controls (HC).
 
