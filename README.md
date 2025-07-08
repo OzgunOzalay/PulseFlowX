@@ -28,50 +28,51 @@ Data/
 
 3. **Configure groups:**
 ```bash
-python pulseflow_manage.py --add sub-ALC2158 AUD
-python pulseflow_manage.py --add sub-ALC2161 HC
+python pulseflow_00_setup.py --add sub-ALC2158 AUD
+python pulseflow_00_setup.py --add sub-ALC2161 HC
 ```
 
 4. **Run the PulseFlowX pipeline:**
 ```bash
-# 1. Preprocessing
-python pulseflow_preprocess.py
+# Step 1: Preprocessing
+python pulseflow_01_preprocess.py
 
-# 2. Sustained/Phasic Analysis
-python pulseflow_dynamics.py
+# Step 2: Sustained/Phasic Analysis
+python pulseflow_02_dynamics.py
 
-# 3. ROI Analysis (requires subject-specific masks)
-python pulseflow_roi.py --roi amygdala --hemisphere left
+# Step 3: ROI Analysis (requires subject-specific masks)
+python pulseflow_03_roi.py --roi amygdala --hemisphere left
 
-# 4. Group Analysis & Publication Outputs
-python pulseflow_stats.py
+# Step 4: Group Analysis & Publication Outputs
+python pulseflow_04_stats.py
 ```
 
 ## Pipeline Components
 
-### `pulseflow_preprocess.py`
+### `pulseflow_00_setup.py`
+- Group assignment management
+- Subject organization utilities
+- Initial pipeline configuration
+
+### `pulseflow_01_preprocess.py`
 - Slice timing correction, despiking, motion correction
 - GLM analysis with contrast calculations
 - Quality control generation
 
-### `pulseflow_dynamics.py`
+### `pulseflow_02_dynamics.py`
 - Extracts sustained (0-20s) and phasic (0-14s) responses
 - Group-level statistical comparisons
 - Contrast generation for threat processing conditions
 
-### `pulseflow_roi.py`
+### `pulseflow_03_roi.py`
 - ROI-based activation extraction
-- Subject-specific mask support
+- Subject-specific mask support (left/right hemisphere analysis)
 - Individual and group-level statistics
 
-### `pulseflow_stats.py`
+### `pulseflow_04_stats.py`
 - Publication-quality statistical tables
 - Comprehensive visualizations
 - Effect size calculations and significance testing
-
-### `pulseflow_manage.py`
-- Group assignment management
-- Subject organization utilities
 
 ## ROI Analysis Setup
 

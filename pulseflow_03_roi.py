@@ -31,25 +31,25 @@ class ROIAnalyzer:
             'amygdala': {
                 'atlas': 'CA_N27_ML',
                 'subcortical': True,
-                'hemispheres': ['left', 'right', 'bilateral'],
+                'hemispheres': ['left', 'right'],
                 'description': 'Amygdala - key region for threat processing and fear responses'
             },
             'insula': {
                 'atlas': 'CA_N27_ML',
                 'cortical': True,
-                'hemispheres': ['left', 'right', 'bilateral'],
+                'hemispheres': ['left', 'right'],
                 'description': 'Insula - interoception and emotional processing'
             },
             'prefrontal_cortex': {
                 'atlas': 'CA_N27_ML',
                 'cortical': True,
-                'hemispheres': ['left', 'right', 'bilateral'],
+                'hemispheres': ['left', 'right'],
                 'description': 'Prefrontal cortex - executive control and emotion regulation'
             },
             'hippocampus': {
                 'atlas': 'CA_N27_ML',
                 'subcortical': True,
-                'hemispheres': ['left', 'right', 'bilateral'],
+                'hemispheres': ['left', 'right'],
                 'description': 'Hippocampus - memory and contextual fear processing'
             }
         }
@@ -74,7 +74,7 @@ class ROIAnalyzer:
         console_handler = RichHandler(rich_tracebacks=True)
         console_handler.setLevel(logging.INFO)
 
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
         console_handler.setFormatter(formatter)
 
         logger.addHandler(console_handler)
@@ -96,7 +96,7 @@ class ROIAnalyzer:
             self.logger.error(f"Error loading group assignments: {e}")
             return {}
 
-    def download_atlas_masks(self, roi_name, hemisphere='bilateral'):
+    def download_atlas_masks(self, roi_name, hemisphere='left'):
         """Download and prepare atlas masks for ROI analysis."""
 
         self.logger.info(f"Preparing atlas masks for {roi_name} ({hemisphere})")
@@ -109,23 +109,19 @@ class ROIAnalyzer:
         atlas_specs = {
             'amygdala': {
                 'left': 'CA_N27_ML:left:Left_Amygdala',
-                'right': 'CA_N27_ML:right:Right_Amygdala',
-                'bilateral': 'bilateral_combine'  # Special flag for bilateral combination
+                'right': 'CA_N27_ML:right:Right_Amygdala'
             },
             'insula': {
                 'left': 'CA_N27_ML:left:Left_Insula',
-                'right': 'CA_N27_ML:right:Right_Insula',
-                'bilateral': 'bilateral_combine'
+                'right': 'CA_N27_ML:right:Right_Insula'
             },
             'prefrontal_cortex': {
                 'left': 'CA_N27_ML:left:Left_Frontal_Pole',
-                'right': 'CA_N27_ML:right:Right_Frontal_Pole',
-                'bilateral': 'bilateral_combine'
+                'right': 'CA_N27_ML:right:Right_Frontal_Pole'
             },
             'hippocampus': {
                 'left': 'CA_N27_ML:left:Left_Hippocampus',
-                'right': 'CA_N27_ML:right:Right_Hippocampus',
-                'bilateral': 'bilateral_combine'
+                'right': 'CA_N27_ML:right:Right_Hippocampus'
             }
         }
 
@@ -140,52 +136,23 @@ class ROIAnalyzer:
         atlas_label = atlas_specs[roi_name][hemisphere]
         output_file = atlas_dir / f"{roi_name}_{hemisphere}_mask_orig+orig"
 
-        if atlas_label == 'bilateral_combine':
-            # Create bilateral mask by combining left and right
-            left_file = atlas_dir / f"{roi_name}_left_mask"
-            right_file = atlas_dir / f"{roi_name}_right_mask"
-            bilateral_tlrc = atlas_dir / f"{roi_name}_bilateral_mask_tlrc"
+        # Create individual hemisphere mask
+        tlrc_file = atlas_dir / f"{roi_name}_{hemisphere}_mask"
+        cmd = f"whereami -mask_atlas_region '{atlas_label}' -prefix {tlrc_file}"
+        
+        try:
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
             
-            # Create left and right masks first
-            left_cmd = f"whereami -mask_atlas_region '{atlas_specs[roi_name]['left']}' -prefix {left_file}"
-            right_cmd = f"whereami -mask_atlas_region '{atlas_specs[roi_name]['right']}' -prefix {right_file}"
+            # Transform to ORIG space
+            resample_cmd = f"3dresample -master processed_data/sustained_phasic_analysis/sub-ALC2158/sustained/sub-ALC2158_FearCue_sustained_mean+orig -input {tlrc_file}+tlrc -prefix {output_file.with_suffix('')}"
+            subprocess.run(resample_cmd, shell=True, check=True, capture_output=True)
             
-            try:
-                subprocess.run(left_cmd, shell=True, check=True, capture_output=True)
-                subprocess.run(right_cmd, shell=True, check=True, capture_output=True)
-                
-                # Combine left and right masks
-                combine_cmd = f"3dcalc -a {left_file}+tlrc -b {right_file}+tlrc -expr 'step(a)+step(b)' -prefix {bilateral_tlrc}"
-                subprocess.run(combine_cmd, shell=True, check=True, capture_output=True)
-                
-                # Transform to ORIG space to match the data
-                resample_cmd = f"3dresample -master processed_data/sustained_phasic_analysis/sub-ALC2158/sustained/sub-ALC2158_FearCue_sustained_mean+orig -input {bilateral_tlrc}+tlrc -prefix {output_file.with_suffix('')}"
-                subprocess.run(resample_cmd, shell=True, check=True, capture_output=True)
-                
-                self.logger.info(f"✓ Created bilateral atlas mask in ORIG space: {output_file}")
-                return output_file
-                
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Error creating bilateral atlas mask: {e}")
-                return None
-        else:
-            # Create individual hemisphere mask
-            tlrc_file = atlas_dir / f"{roi_name}_{hemisphere}_mask"
-            cmd = f"whereami -mask_atlas_region '{atlas_label}' -prefix {tlrc_file}"
-            
-            try:
-                subprocess.run(cmd, shell=True, check=True, capture_output=True)
-                
-                # Transform to ORIG space
-                resample_cmd = f"3dresample -master processed_data/sustained_phasic_analysis/sub-ALC2158/sustained/sub-ALC2158_FearCue_sustained_mean+orig -input {tlrc_file}+tlrc -prefix {output_file.with_suffix('')}"
-                subprocess.run(resample_cmd, shell=True, check=True, capture_output=True)
-                
-                self.logger.info(f"✓ Created atlas mask in ORIG space: {output_file}")
-                return output_file
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Error creating atlas mask: {e}")
-                self.logger.error(f"Command: {cmd}")
-                return None
+            self.logger.info(f"✓ Created atlas mask in ORIG space: {output_file}")
+            return output_file
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Error creating atlas mask: {e}")
+            self.logger.error(f"Command: {cmd}")
+            return None
 
     def load_subject_specific_mask(self, subject_id, roi_name, hemisphere):
         """Load subject-specific ROI mask in ORIG space."""
@@ -269,7 +236,7 @@ class ROIAnalyzer:
             self.logger.error(f"Error extracting ROI values: {e}")
             return None
 
-    def analyze_subject_roi(self, subject_id, roi_name='amygdala', hemisphere='bilateral'):
+    def analyze_subject_roi(self, subject_id, roi_name='amygdala', hemisphere='left'):
         """Complete ROI analysis for a single subject using subject-specific masks."""
 
         self.logger.info(f"Starting ROI analysis for {subject_id} - {roi_name} ({hemisphere})")
@@ -324,7 +291,7 @@ class ROIAnalyzer:
         self.logger.info(f"✓ Completed ROI analysis for {subject_id}")
         return subject_results
 
-    def run_group_statistics(self, roi_name='amygdala', hemisphere='bilateral'):
+    def run_group_statistics(self, roi_name='amygdala', hemisphere='left'):
         """Run statistical tests for group comparisons within ROI."""
 
         self.logger.info(f"Running group statistics for {roi_name} ({hemisphere})")
@@ -403,7 +370,7 @@ class ROIAnalyzer:
         self.logger.info(f"✓ Completed group statistics for {roi_name}")
         return statistical_results
 
-    def create_roi_visualizations(self, roi_name='amygdala', hemisphere='bilateral'):
+    def create_roi_visualizations(self, roi_name='amygdala', hemisphere='left'):
         """Create visualizations for ROI analysis results."""
 
         self.logger.info(f"Creating visualizations for {roi_name} ({hemisphere})")
@@ -537,7 +504,7 @@ class ROIAnalyzer:
 
         self.logger.info(f"✓ Created visualization: {plot_file}")
 
-    def run_complete_roi_analysis(self, roi_name='amygdala', hemisphere='bilateral'):
+    def run_complete_roi_analysis(self, roi_name='amygdala', hemisphere='left'):
         """Run complete ROI analysis pipeline."""
 
         self.logger.info(f"Starting complete ROI analysis for {roi_name} ({hemisphere})")
@@ -561,7 +528,7 @@ def main():
     parser.add_argument("--output_dir", default="processed_data", help="Output directory")
     parser.add_argument("--roi", default="amygdala", choices=["amygdala", "insula", "prefrontal_cortex", "hippocampus"],
                        help="ROI to analyze")
-    parser.add_argument("--hemisphere", default="bilateral", choices=["left", "right", "bilateral"],
+    parser.add_argument("--hemisphere", default="left", choices=["left", "right"],
                        help="Hemisphere to analyze")
     parser.add_argument("--subject", help="Process specific subject only")
     parser.add_argument("--group_only", action="store_true", help="Run group analysis only")

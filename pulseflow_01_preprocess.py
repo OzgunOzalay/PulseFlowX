@@ -390,7 +390,7 @@ class FMRIProcessor:
         console_handler.setLevel(logging.INFO)
         
         # Create formatters
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
         console_handler.setFormatter(formatter)
         
         # Add handlers to logger

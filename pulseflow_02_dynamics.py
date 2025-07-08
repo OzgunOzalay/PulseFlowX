@@ -52,7 +52,7 @@ class SustainedPhasicAnalyzer:
         console_handler = RichHandler(rich_tracebacks=True)
         console_handler.setLevel(logging.INFO)
 
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
         console_handler.setFormatter(formatter)
 
         logger.addHandler(console_handler)
