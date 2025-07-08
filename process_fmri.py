@@ -10,13 +10,8 @@ import shutil
 from datetime import datetime
 import logging
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.logging import RichHandler
 import multiprocessing
-from functools import partial
-import queue
-import threading
-import sys
 
 def process_single_run(args):
     """Process a single run of fMRI data (static function for multiprocessing)."""

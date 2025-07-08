@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 
 import os
-import sys
 import json
 import argparse
 from pathlib import Path
 import subprocess
 import logging
 import numpy as np
-import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+
 
 class SustainedPhasicAnalyzer:
     """Class for analyzing sustained vs phasic responses using TENT functions."""
-    
+
     def __init__(self, output_dir, logger=None):
         self.output_dir = Path(output_dir)
         self.sustained_phasic_dir = self.output_dir / "sustained_phasic_analysis"
         self.sustained_phasic_dir.mkdir(exist_ok=True)
         self.logger = logger or self._setup_logger()
-        
+
         # Define response types and their TENT ranges
         self.response_types = {
             'sustained': {
@@ -35,59 +33,59 @@ class SustainedPhasicAnalyzer:
                 'description': 'Initial response (first 8 TENT functions)'
             }
         }
-        
+
         # Define conditions
         self.conditions = [
-            'FearCue', 'NeutralCue', 
+            'FearCue', 'NeutralCue',
             'FearImage', 'NeutralImage',
             'UnknownCue', 'UnknownFear', 'UnknownNeutral'
         ]
-        
+
         # Load group assignments from JSON file
         self.test_groups = self._load_group_assignments()
-        
+
     def _setup_logger(self):
         """Setup logging for standalone use."""
         logger = logging.getLogger("SustainedPhasicAnalyzer")
         logger.setLevel(logging.INFO)
-        
+
         console_handler = RichHandler(rich_tracebacks=True)
         console_handler.setLevel(logging.INFO)
-        
+
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         console_handler.setFormatter(formatter)
-        
+
         logger.addHandler(console_handler)
         return logger
-    
+
     def _load_group_assignments(self):
         """Load subject group assignments from JSON file."""
         group_file = Path("subject_groups.json")
-        
+
         if not group_file.exists():
             self.logger.warning(f"Group assignment file {group_file} not found. Using default assignments.")
             return {
                 'AUD': ['sub-ALC2158'],
                 'HC': ['sub-ALC2161']
             }
-        
+
         try:
             with open(group_file, 'r') as f:
                 data = json.load(f)
-            
+
             groups = data.get('groups', {})
-            
+
             # Validate that we have both AUD and HC groups
             if 'AUD' not in groups or 'HC' not in groups:
                 raise ValueError("Group file must contain both 'AUD' and 'HC' groups")
-            
+
             # Log group information
             aud_count = len(groups['AUD'])
             hc_count = len(groups['HC'])
             self.logger.info(f"Loaded group assignments: {aud_count} AUD subjects, {hc_count} HC subjects")
-            
+
             return groups
-            
+
         except (json.JSONDecodeError, ValueError) as e:
             self.logger.error(f"Error loading group assignments: {e}")
             self.logger.warning("Using default group assignments")
@@ -95,32 +93,32 @@ class SustainedPhasicAnalyzer:
                 'AUD': ['sub-ALC2158'],
                 'HC': ['sub-ALC2161']
             }
-    
+
     def extract_response_components(self, subject_id, glm_file, response_type):
         """Extract sustained or phasic response components from GLM results."""
-        
+
         tent_range = self.response_types[response_type]['tent_range']
         self.logger.info(f"Extracting {response_type} response for {subject_id} using TENTs {tent_range}")
-        
+
         # Create output directory
         output_dir = self.sustained_phasic_dir / subject_id / response_type
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         results = {}
-        
+
         for condition in self.conditions:
             # Extract TENT coefficients for this condition
             tent_coefficients = []
-            
+
             for tent_idx in tent_range:
                 subbrick = f'{condition}#{tent_idx}_Coef'
-                
+
                 # Use 3dcalc to extract the coefficient
                 temp_file = output_dir / f"temp_{condition}_tent{tent_idx}"
                 cmd = f"3dcalc -a '{glm_file}[{subbrick}]' -expr a -prefix {temp_file}"
-                
+
                 try:
-                    result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+                    subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
                     tent_coefficients.append(str(temp_file) + "+orig")
                     self.logger.info(f"✓ Extracted {subbrick}")
                 except subprocess.CalledProcessError as e:
@@ -129,30 +127,30 @@ class SustainedPhasicAnalyzer:
                     self.logger.error(f"STDOUT: {e.stdout}")
                     self.logger.error(f"STDERR: {e.stderr}")
                     continue
-            
+
             if tent_coefficients:
                 # Combine TENT coefficients into a single file
                 combined_file = output_dir / f"{subject_id}_{condition}_{response_type}_response"
-                
+
                 # Create a script to combine the TENT coefficients
                 script_content = f"""#!/bin/bash
 # Combine TENT coefficients for {condition} {response_type} response
 3dTcat -prefix {combined_file} {' '.join(tent_coefficients)}
 """
-                
+
                 script_file = output_dir / f"combine_{condition}_{response_type}.sh"
                 with open(script_file, 'w') as f:
                     f.write(script_content)
-                
+
                 # Make script executable and run it
                 os.chmod(script_file, 0o755)
                 try:
-                    result = subprocess.run(str(script_file), shell=True, check=True, capture_output=True, text=True)
-                    
+                    subprocess.run(str(script_file), shell=True, check=True, capture_output=True, text=True)
+
                     # Calculate mean across all TENT functions to get a single response value
                     mean_file = output_dir / f"{subject_id}_{condition}_{response_type}_mean"
                     mean_cmd = f"3dTstat -mean -prefix {mean_file} '{combined_file}+orig'"
-                    
+
                     try:
                         subprocess.run(mean_cmd, shell=True, check=True, capture_output=True, text=True)
                         results[condition] = str(mean_file) + "+orig"
@@ -160,7 +158,7 @@ class SustainedPhasicAnalyzer:
                     except subprocess.CalledProcessError as e:
                         self.logger.error(f"Error calculating mean for {condition}: {e}")
                         continue
-                    
+
                     # Clean up temporary files only after successful combination
                     for temp_file in tent_coefficients:
                         temp_path = Path(temp_file.replace("+orig", ""))
@@ -172,13 +170,13 @@ class SustainedPhasicAnalyzer:
                         brik_path = temp_path.with_suffix('.BRIK.gz')
                         if brik_path.exists():
                             brik_path.unlink()
-                                
+
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Error combining TENT coefficients for {condition}: {e}")
                     self.logger.error(f"Script: {script_file}")
                     self.logger.error(f"STDOUT: {e.stdout}")
                     self.logger.error(f"STDERR: {e.stderr}")
-                    
+
                     # Clean up temporary files even on error
                     for temp_file in tent_coefficients:
                         temp_path = Path(temp_file.replace("+orig", ""))
@@ -190,12 +188,12 @@ class SustainedPhasicAnalyzer:
                         brik_path = temp_path.with_suffix('.BRIK.gz')
                         if brik_path.exists():
                             brik_path.unlink()
-        
+
         return results
-    
+
     def calculate_response_contrasts(self, subject_id, response_type, response_files):
         """Calculate contrasts for a specific response type."""
-        
+
         self.logger.info(f"Calculating contrasts for {response_type} responses in {subject_id}")
         
         output_dir = self.sustained_phasic_dir / subject_id / response_type
@@ -305,8 +303,8 @@ class SustainedPhasicAnalyzer:
             "3dttest++",
             "-setA", *aud_files,
             "-setB", *hc_files,
-            "-prefix", str(output_prefix),
-            "-Clustsim"  # Add cluster simulation for multiple comparisons
+            "-prefix", str(output_prefix)
+            # Note: -Clustsim requires >=4 subjects per group, we have 3 per group
         ]
         
         try:
@@ -407,11 +405,11 @@ class SustainedPhasicAnalyzer:
             for subject in subjects:
                 self.analyze_subject(subject)
         
-        # Run group analyses
-        group_results = self.run_group_analyses()
+        # Skip group analyses for now (can be run separately later)
+        self.logger.info("✓ Completed individual subject analyses")
+        self.logger.info("Note: Group analysis skipped - run with --group_only flag after verifying individual results")
         
-        self.logger.info("✓ Completed full analysis pipeline")
-        return group_results
+        return None
 
 def main():
     parser = argparse.ArgumentParser(description="Sustained vs Phasic Response Analysis")
