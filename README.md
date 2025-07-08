@@ -11,7 +11,8 @@
 [![AFNI](https://img.shields.io/badge/AFNI-23.0+-green.svg)](https://afni.nimh.nih.gov/)
 [![FIR Analysis](https://img.shields.io/badge/Analysis-FIR-red.svg)](https://en.wikipedia.org/wiki/Finite_impulse_response)
 [![fMRI](https://img.shields.io/badge/Analysis-fMRI-purple.svg)](https://en.wikipedia.org/wiki/Functional_magnetic_resonance_imaging)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-20.04+-orange.svg)](https://ubuntu.com/)
+
 
 </div>
 
@@ -26,14 +27,79 @@
 - **Group comparisons** with publication-quality statistics
 - **Automated visualizations** and reporting
 
-## Quick Start
+## Installation
 
-1. **Install dependencies:**
+### System Requirements
+
+- **Operating System**: Ubuntu 20.04+ (recommended)
+- **RAM**: Minimum 8GB, 16GB+ recommended for large datasets
+- **Storage**: Sufficient space for raw and processed fMRI data
+- **Processor**: Multi-core CPU recommended for parallel processing
+
+### 1. Install AFNI
+
+**PulseFlowX** requires AFNI version 23.0 or higher with FIR deconvolution capabilities.
+
+#### Ubuntu/Debian Installation:
 ```bash
+# Update system
+sudo apt-get update
+
+# Install AFNI dependencies
+sudo apt-get install -y tcsh xfonts-base python3-matplotlib python3-numpy \
+                       python3-flask python3-flask-cors python3-pil libgsl-dev \
+                       netpbm gnome-tweak-tool libjpeg62 xvfb xterm vim curl \
+                       gedit evince firefox
+
+# Download and install AFNI
+curl -O https://afni.nimh.nih.gov/pub/dist/bin/misc/@update.afni.binaries
+tcsh @update.afni.binaries -package linux_ubuntu_16_64 -do_extras
+```
+
+#### Verify AFNI Installation:
+```bash
+# Add AFNI to PATH (add to ~/.bashrc)
+export PATH=$PATH:$HOME/abin
+
+# Verify installation
+afni -ver
+3dDeconvolve -help
+```
+
+### 2. Install Python Dependencies
+
+```bash
+# Install Python 3.8+ (if not already installed)
+sudo apt-get install python3 python3-pip
+
+# Install PulseFlowX dependencies
 pip install -r requirements.txt
 ```
 
-2. **Organize your data:**
+#### Python Dependencies (`requirements.txt`):
+```
+pandas>=1.3.0          # Data manipulation and analysis
+numpy>=1.20.0          # Numerical computing
+rich>=10.0.0           # Rich text and beautiful formatting
+matplotlib>=3.5.0      # Plotting and visualization
+seaborn>=0.11.0        # Statistical data visualization
+scipy>=1.7.0           # Scientific computing
+nibabel>=3.2.0         # Neuroimaging data I/O
+```
+
+### 3. Verify Installation
+
+```bash
+# Test AFNI functionality
+3dinfo -help
+
+# Test Python environment
+python3 -c "import pandas, numpy, nibabel, matplotlib, seaborn, scipy; print('All Python dependencies installed successfully!')"
+```
+
+## Quick Start
+
+1. **Organize your data:**
 ```
 Data/
 ├── sub-ALC2158/
@@ -114,12 +180,19 @@ processed_data/
     └── GROUP_ANALYSIS_REPORT.md
 ```
 
-## Requirements
+## System Requirements Summary
 
-- **AFNI** (version 23.0+) with FIR deconvolution capabilities
-- **Python 3.8+**
-- **Subject-specific ROI masks** in ORIG space
-- Sufficient computational resources for FIR analysis
+| Component | Requirement | Notes |
+|-----------|-------------|-------|
+| **Operating System** | Ubuntu 20.04+ | Other Linux distributions may work |
+| **AFNI** | Version 23.0+ | Must include FIR deconvolution tools |
+| **Python** | 3.8+ | With pip package manager |
+| **RAM** | 8GB minimum, 16GB+ recommended | For processing large fMRI datasets |
+| **Storage** | Variable | Depends on dataset size |
+| **CPU** | Multi-core recommended | For parallel processing |
+| **ROI Masks** | Subject-specific masks in ORIG space | Required for ROI analysis |
+
+For detailed installation instructions, see the [Installation](#installation) section above.
 
 ## Citation
 
@@ -127,11 +200,11 @@ If you use PulseFlowX, please cite the relevant AFNI tools and consider referenc
 
 ## Author & Lab
 
-**PulseFlowX** was developed by **Ozgun Ozalay** (oozalay@unmc.edu) at the **Blackford Emotional Neuroscience Lab**, Mind & Mental Health Institute (MMI), University of Nebraska Medical Center (UNMC).
+**PulseFlowX** was developed by **Ozgun Ozalay** (oozalay@unmc.edu) at the **Blackford Emotional Neuroscience Lab**, Monroe - Meyer Institute (MMI), University of Nebraska Medical Center (UNMC).
 
 ### Lab Information
 - **Lab**: Blackford Emotional Neuroscience Lab
-- **Institution**: Mind & Mental Health Institute (MMI), University of Nebraska Medical Center (UNMC)
+- **Institution**: Monroe - Meyer Institute (MMI), University of Nebraska Medical Center (UNMC)
 - **Contact**: oozalay@unmc.edu
 
 ## License
