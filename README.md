@@ -2,7 +2,7 @@
   <img src="PulseFlowX.png" alt="PulseFlowX Logo" width="400"/>
 </div>
 
-#Advanced FIR Analysis with AFNI in Unpredictable Threat Task
+# Advanced FIR Analysis with AFNI in Unpredictable Threat Task
 
 <div align="center">
 
