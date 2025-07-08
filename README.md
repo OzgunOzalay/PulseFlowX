@@ -2,7 +2,7 @@
   <img src="PulseFlowX.png" alt="PulseFlowX Logo" width="400"/>
 </div>
 
-# PulseFlowX: Advanced FIR-Based fMRI Threat Processing Pipeline
+#Advanced FIR Analysis with AFNI in Unpredictable Threat Task
 
 <div align="center">
 
