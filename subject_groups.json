@@ -1,14 +1,20 @@
 {
   "groups": {
     "AUD": [
-      "sub-ALC2158",
-      "sub-ALC2132",
-      "sub-ALC2134"
+      "sub-ALC2001",
+      "sub-ALC2002", 
+      "sub-ALC2003",
+      "sub-ALC2004",
+      "sub-ALC2045",
+      "sub-ALC2047"
     ],
     "HC": [
-      "sub-ALC2161",
-      "sub-ALC2118", 
-      "sub-ALC2131"
+      "sub-ALC2048",
+      "sub-ALC2054",
+      "sub-ALC2064",
+      "sub-ALC2069",
+      "sub-ALC2089",
+      "sub-ALC2104"
     ]
   }
 } 

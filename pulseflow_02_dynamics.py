@@ -58,16 +58,37 @@ class SustainedPhasicAnalyzer:
         logger.addHandler(console_handler)
         return logger
 
+    def _detect_available_subjects(self):
+        """Detect available subjects from processed_data/glm_results directory."""
+        glm_dir = self.output_dir / "glm_results"
+        
+        if not glm_dir.exists():
+            self.logger.warning(f"GLM results directory not found: {glm_dir}")
+            return []
+        
+        available_subjects = []
+        for item in glm_dir.iterdir():
+            if item.is_dir() and item.name.startswith('sub-'):
+                # Check if GLM files exist for this subject
+                glm_file = item / f"{item.name}_glm+orig"
+                glm_head = glm_file.with_suffix('.HEAD')
+                glm_brik = glm_file.with_suffix('.BRIK.gz')
+                
+                if glm_head.exists() and glm_brik.exists():
+                    available_subjects.append(item.name)
+                else:
+                    self.logger.warning(f"GLM files missing for {item.name}")
+        
+        self.logger.info(f"Detected {len(available_subjects)} subjects with GLM files: {available_subjects}")
+        return available_subjects
+
     def _load_group_assignments(self):
         """Load subject group assignments from JSON file."""
         group_file = Path("subject_groups.json")
 
         if not group_file.exists():
             self.logger.warning(f"Group assignment file {group_file} not found. Using default assignments.")
-            return {
-                'AUD': ['sub-ALC2158'],
-                'HC': ['sub-ALC2161']
-            }
+            return self._create_default_groups()
 
         try:
             with open(group_file, 'r') as f:
@@ -79,20 +100,65 @@ class SustainedPhasicAnalyzer:
             if 'AUD' not in groups or 'HC' not in groups:
                 raise ValueError("Group file must contain both 'AUD' and 'HC' groups")
 
+            # Check if the subjects in the JSON file actually exist
+            available_subjects = self._detect_available_subjects()
+            
+            if not available_subjects:
+                self.logger.error("No subjects with GLM files found!")
+                return self._create_default_groups()
+            
+            # Filter groups to only include available subjects
+            filtered_groups = {}
+            for group_name, subjects in groups.items():
+                filtered_subjects = [s for s in subjects if s in available_subjects]
+                if filtered_subjects:
+                    filtered_groups[group_name] = filtered_subjects
+                    self.logger.info(f"Group {group_name}: {len(filtered_subjects)} subjects available out of {len(subjects)}")
+                else:
+                    self.logger.warning(f"No subjects from group {group_name} found in available data")
+            
+            # If we don't have both groups, create default groups from available subjects
+            if len(filtered_groups) < 2:
+                self.logger.warning("Not enough groups found in JSON file, creating default groups from available subjects")
+                return self._create_default_groups(available_subjects)
+            
             # Log group information
-            aud_count = len(groups['AUD'])
-            hc_count = len(groups['HC'])
-            self.logger.info(f"Loaded group assignments: {aud_count} AUD subjects, {hc_count} HC subjects")
+            aud_count = len(filtered_groups['AUD'])
+            hc_count = len(filtered_groups['HC'])
+            self.logger.info(f"Using group assignments: {aud_count} AUD subjects, {hc_count} HC subjects")
 
-            return groups
+            return filtered_groups
 
         except (json.JSONDecodeError, ValueError) as e:
             self.logger.error(f"Error loading group assignments: {e}")
             self.logger.warning("Using default group assignments")
-            return {
-                'AUD': ['sub-ALC2158'],
-                'HC': ['sub-ALC2161']
-            }
+            return self._create_default_groups()
+
+    def _create_default_groups(self, available_subjects=None):
+        """Create default group assignments from available subjects."""
+        if available_subjects is None:
+            available_subjects = self._detect_available_subjects()
+        
+        if not available_subjects:
+            self.logger.error("No subjects available for group assignment!")
+            return {'AUD': [], 'HC': []}
+        
+        # Sort subjects to ensure consistent assignment
+        available_subjects.sort()
+        
+        # Split subjects into two groups
+        mid_point = len(available_subjects) // 2
+        aud_subjects = available_subjects[:mid_point]
+        hc_subjects = available_subjects[mid_point:]
+        
+        self.logger.info(f"Created default groups: {len(aud_subjects)} AUD, {len(hc_subjects)} HC")
+        self.logger.info(f"AUD subjects: {aud_subjects}")
+        self.logger.info(f"HC subjects: {hc_subjects}")
+        
+        return {
+            'AUD': aud_subjects,
+            'HC': hc_subjects
+        }
 
     def extract_response_components(self, subject_id, glm_file, response_type):
         """Extract sustained or phasic response components from GLM results."""
@@ -131,28 +197,55 @@ class SustainedPhasicAnalyzer:
             if tent_coefficients:
                 # Combine TENT coefficients into a single file
                 combined_file = output_dir / f"{subject_id}_{condition}_{response_type}_response"
+                
+                # Remove any existing combined files to avoid conflicts (before script creation)
+                combined_head = combined_file.with_suffix('.HEAD')
+                combined_brik = combined_file.with_suffix('.BRIK.gz')
+                combined_head.unlink(missing_ok=True)
+                combined_brik.unlink(missing_ok=True)
+                if combined_file.exists():
+                    combined_file.unlink()
 
-                # Create a script to combine the TENT coefficients
-                script_content = f"""#!/bin/bash
-# Combine TENT coefficients for {condition} {response_type} response
-3dTcat -prefix {combined_file} {' '.join(tent_coefficients)}
-"""
-
-                script_file = output_dir / f"combine_{condition}_{response_type}.sh"
-                with open(script_file, 'w') as f:
-                    f.write(script_content)
-
-                # Make script executable and run it
-                os.chmod(script_file, 0o755)
+                # Run 3dTcat directly instead of creating a script
+                relative_tent_files = [Path(f).name for f in tent_coefficients]
+                
+                # Build the 3dTcat command
+                cmd = ["3dTcat", "-prefix", combined_file.name] + relative_tent_files
+                
                 try:
-                    subprocess.run(str(script_file), shell=True, check=True, capture_output=True, text=True)
+                    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(output_dir))
+                    if result.returncode != 0:
+                        self.logger.error(f"3dTcat failed with return code {result.returncode}")
+                        self.logger.error(f"STDOUT: {result.stdout}")
+                        self.logger.error(f"STDERR: {result.stderr}")
+                        continue
+
+                    # Check if the combined file was created successfully
+                    # 3dTcat creates files with +orig suffix
+                    combined_head = Path(str(combined_file) + "+orig.HEAD")
+                    combined_brik = Path(str(combined_file) + "+orig.BRIK.gz")
+                    
+                    if not (combined_head.exists() and combined_brik.exists()):
+                        self.logger.error(f"Combined file not created for {condition}")
+                        continue
+                    
+                    # Verify file integrity by checking file size (should be ~32MB for sustained, ~23MB for phasic)
+                    expected_size = 32 if response_type == 'sustained' else 23  # MB
+                    actual_size = combined_brik.stat().st_size / (1024 * 1024)
+                    
+                    if actual_size < expected_size * 0.8:  # Allow 20% tolerance
+                        self.logger.warning(f"Combined file for {condition} seems corrupted (size: {actual_size:.1f}MB, expected: ~{expected_size}MB)")
+                        # Remove corrupted file and skip
+                        combined_head.unlink(missing_ok=True)
+                        combined_brik.unlink(missing_ok=True)
+                        continue
 
                     # Calculate mean across all TENT functions to get a single response value
                     mean_file = output_dir / f"{subject_id}_{condition}_{response_type}_mean"
-                    mean_cmd = f"3dTstat -mean -prefix {mean_file} '{combined_file}+orig'"
+                    mean_cmd = f"3dTstat -mean -prefix {mean_file.name} '{combined_file.name}+orig'"
 
                     try:
-                        subprocess.run(mean_cmd, shell=True, check=True, capture_output=True, text=True)
+                        subprocess.run(mean_cmd, shell=True, check=True, capture_output=True, text=True, cwd=str(output_dir))
                         results[condition] = str(mean_file) + "+orig"
                         self.logger.info(f"✓ Created {response_type} response for {condition}")
                     except subprocess.CalledProcessError as e:
@@ -236,7 +329,7 @@ class SustainedPhasicAnalyzer:
                 # All conditions available, calculate contrast
                 output_file = contrast_dir / f"{subject_id}_{contrast_name}"
                 
-                # Build 3dcalc command
+                # Build 3dcalc command with absolute paths
                 input_args = []
                 for i, condition in enumerate(required_conditions):
                     var = chr(ord('a') + i)

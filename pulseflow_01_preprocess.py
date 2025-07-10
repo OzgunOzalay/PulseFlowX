@@ -796,9 +796,16 @@ def main():
         test_subjects = [args.subject]
         console.print(f"[cyan]Processing single subject: {args.subject}[/cyan]")
     else:
-        # Process all test subjects
-        test_subjects = ["sub-ALC2158", "sub-ALC2161", "sub-ALC2118", "sub-ALC2131", "sub-ALC2132", "sub-ALC2134"]
-        console.print(f"[cyan]Processing all subjects: {', '.join(test_subjects)}[/cyan]")
+        # Get actual subjects from Data directory
+        data_path = Path(args.data_dir)
+        if data_path.exists():
+            test_subjects = [d.name for d in data_path.iterdir() if d.is_dir() and d.name.startswith('sub-')]
+            test_subjects.sort()  # Sort for consistent ordering
+        else:
+            console.print(f"[red]Error: Data directory {args.data_dir} not found![/red]")
+            return
+        
+        console.print(f"[cyan]Found {len(test_subjects)} subjects: {', '.join(test_subjects)}[/cyan]")
     
     # Process subjects
     if processing_mode == "parallel":
