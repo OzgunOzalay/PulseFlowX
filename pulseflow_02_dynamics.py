@@ -526,14 +526,14 @@ class SustainedPhasicAnalyzer:
         converted_files = []
         for response_type, contrasts in group_results.items():
             for contrast_name, contrast_info in contrasts.items():
-                nifti_file = self._convert_afni_to_nifti(
+                nifti_files = self._convert_afni_to_nifti(
                     contrast_info['file'], 
                     contrast_name, 
                     response_type, 
                     nifti_dir
                 )
-                if nifti_file:
-                    converted_files.append(nifti_file)
+                if nifti_files:
+                    converted_files.extend(nifti_files)
         
         self.logger.info(f"✓ Converted {len(converted_files)} files to NIfTI format")
         self.logger.info(f"✓ NIfTI files saved to: {nifti_dir}")
@@ -544,36 +544,49 @@ class SustainedPhasicAnalyzer:
 
 
     def _convert_afni_to_nifti(self, afni_file, contrast_name, response_type, output_dir):
-        """Convert AFNI file to NIfTI format, extracting the t-stat sub-brick."""
+        """Convert AFNI file to NIfTI format, extracting both t-stats and p-values."""
         
         # Clean up the contrast name for filename
         clean_contrast_name = self._clean_contrast_name(contrast_name)
         
-        # Create meaningful filename
-        nifti_filename = f"{clean_contrast_name}_{response_type}_AUD_vs_HC.nii.gz"
-        nifti_file = output_dir / nifti_filename
+        # Create t-stat NIfTI file
+        tstat_filename = f"{clean_contrast_name}_{response_type}_AUD_vs_HC_tstat.nii.gz"
+        tstat_file = output_dir / tstat_filename
         
-        # Extract the t-statistic sub-brick (usually sub-brick 1) for meaningful brain maps
-        cmd = f"3dAFNItoNIFTI -prefix {nifti_file} '{afni_file}[1]'"
+        # Create p-value NIfTI file  
+        pval_filename = f"{clean_contrast_name}_{response_type}_AUD_vs_HC_pval.nii.gz"
+        pval_file = output_dir / pval_filename
+        
+        converted_files = []
+        
+        # Extract t-statistics (sub-brick 1)
+        cmd_tstat = f"3dAFNItoNIFTI -prefix {tstat_file} '{afni_file}[1]'"
         
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            if result.returncode == 0 and nifti_file.exists():
-                self.logger.info(f"✓ Converted to NIfTI (t-stat): {nifti_filename}")
-                return nifti_file
+            result = subprocess.run(cmd_tstat, shell=True, capture_output=True, text=True)
+            if result.returncode == 0 and tstat_file.exists():
+                self.logger.info(f"✓ Converted t-stats to NIfTI: {tstat_filename}")
+                converted_files.append(tstat_file)
             else:
-                # Try with sub-brick 0 as fallback
-                cmd_fallback = f"3dAFNItoNIFTI -prefix {nifti_file} '{afni_file}[0]'"
-                result = subprocess.run(cmd_fallback, shell=True, capture_output=True, text=True)
-                if result.returncode == 0 and nifti_file.exists():
-                    self.logger.info(f"✓ Converted to NIfTI (fallback): {nifti_filename}")
-                    return nifti_file
-                else:
-                    self.logger.warning(f"Failed to convert {afni_file} to NIfTI")
-                    return None
+                self.logger.warning(f"Failed to convert t-stats for {afni_file}")
         except Exception as e:
-            self.logger.warning(f"Error converting {afni_file} to NIfTI: {e}")
-            return None
+            self.logger.warning(f"Error converting t-stats for {afni_file}: {e}")
+        
+        # Convert t-statistics to p-values using 3dcalc
+        # AFNI function: fitt_t2p(t,df) converts t-statistic to p-value
+        # df=10 for our group comparison (n1 + n2 - 2 = 6 + 6 - 2 = 10)
+        try:
+            cmd_pval = f"3dcalc -a '{afni_file}[1]' -expr 'fitt_t2p(a,10)' -prefix {pval_file}"
+            result = subprocess.run(cmd_pval, shell=True, capture_output=True, text=True)
+            if result.returncode == 0 and pval_file.exists():
+                self.logger.info(f"✓ Converted p-values to NIfTI: {pval_filename}")
+                converted_files.append(pval_file)
+            else:
+                self.logger.warning(f"Failed to convert p-values for {afni_file}")
+        except Exception as e:
+            self.logger.warning(f"Error converting p-values for {afni_file}: {e}")
+        
+        return converted_files if converted_files else None
 
 
 

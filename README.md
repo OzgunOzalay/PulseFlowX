@@ -204,17 +204,17 @@ python pulseflow_02_dynamics.py --group_only --convert_nifti
 
 #### **NIfTI Files Generated:**
 
-The conversion creates 6 NIfTI files, one for each contrast:
+The conversion creates 12 NIfTI files (t-stats + p-values) for each contrast:
 
 **Sustained Response Contrasts:**
-- `Fear_vs_Neutral_sustained_AUD_vs_HC.nii.gz`
-- `Predictable_vs_Unknown_sustained_AUD_vs_HC.nii.gz` 
-- `Unknown_Fear_vs_Neutral_sustained_AUD_vs_HC.nii.gz`
+- `Fear_vs_Neutral_sustained_AUD_vs_HC_tstat.nii.gz` + `*_pval.nii.gz`
+- `Predictable_vs_Unknown_sustained_AUD_vs_HC_tstat.nii.gz` + `*_pval.nii.gz`
+- `Unknown_Fear_vs_Neutral_sustained_AUD_vs_HC_tstat.nii.gz` + `*_pval.nii.gz`
 
 **Phasic Response Contrasts:**
-- `Fear_vs_Neutral_phasic_AUD_vs_HC.nii.gz`
-- `Predictable_vs_Unknown_phasic_AUD_vs_HC.nii.gz`
-- `Unknown_Fear_vs_Neutral_phasic_AUD_vs_HC.nii.gz`
+- `Fear_vs_Neutral_phasic_AUD_vs_HC_tstat.nii.gz` + `*_pval.nii.gz`
+- `Predictable_vs_Unknown_phasic_AUD_vs_HC_tstat.nii.gz` + `*_pval.nii.gz`
+- `Unknown_Fear_vs_Neutral_phasic_AUD_vs_HC_tstat.nii.gz` + `*_pval.nii.gz`
 
 #### **Inspecting Results with FSLeyes:**
 
@@ -222,28 +222,37 @@ The conversion creates 6 NIfTI files, one for each contrast:
 # Install FSLeyes (if not already installed)
 pip install fsleyes
 
-# Open individual contrast
-fsleyes processed_data/sustained_phasic_analysis/nifti_results/Fear_vs_Neutral_sustained_AUD_vs_HC.nii.gz
+# Open p-value map for significance testing (p < 0.05)
+fsleyes processed_data/sustained_phasic_analysis/nifti_results/Fear_vs_Neutral_sustained_AUD_vs_HC_pval.nii.gz
 
-# Open all contrasts for comparison
-fsleyes processed_data/sustained_phasic_analysis/nifti_results/*.nii.gz
+# Open t-stat map for effect direction and magnitude
+fsleyes processed_data/sustained_phasic_analysis/nifti_results/Fear_vs_Neutral_sustained_AUD_vs_HC_tstat.nii.gz
+
+# Open both together for comprehensive analysis
+fsleyes processed_data/sustained_phasic_analysis/nifti_results/Fear_vs_Neutral_sustained_AUD_vs_HC_pval.nii.gz processed_data/sustained_phasic_analysis/nifti_results/Fear_vs_Neutral_sustained_AUD_vs_HC_tstat.nii.gz
 ```
 
 #### **File Specifications:**
 
 - **Format**: NIfTI-1 compressed (.nii.gz)
-- **Content**: t-statistic maps from group comparisons (AUD vs HC)
+- **Content**: Both t-statistics and p-values from group comparisons (AUD vs HC)
 - **Space**: Same as original AFNI analysis space
 - **Size**: ~2.7MB per file
-- **Threshold**: No thresholding applied (raw t-statistics)
+- **Threshold**: No thresholding applied (raw statistics)
 
 #### **Analysis Details:**
 
-Each NIfTI file contains t-statistic values from 3dttest++ group comparisons:
+**T-statistic files (*_tstat.nii.gz):**
 - **Positive values**: AUD > HC activation
 - **Negative values**: HC > AUD activation  
 - **Zero values**: No group difference
-- **Statistical significance**: Apply appropriate thresholds in FSLeyes (e.g., |t| > 2.0)
+- **Use for**: Effect direction and magnitude
+
+**P-value files (*_pval.nii.gz):**
+- **Values**: Two-tailed p-values (0.0 to 1.0)
+- **Significance**: p < 0.05 for statistical significance
+- **Use for**: Thresholding significant regions
+- **Workflow**: Threshold p-map at p < 0.05, then check t-map for direction/magnitude
 
 ## System Requirements Summary
 
