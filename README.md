@@ -119,14 +119,17 @@ python pulseflow_00_setup.py --add sub-ALC2161 HC
 # Step 1: Preprocessing
 python pulseflow_01_preprocess.py
 
-# Step 2: Sustained/Phasic Analysis
-python pulseflow_02_dynamics.py
+# Step 2: Sustained/Phasic Analysis (with plots)
+python pulseflow_02_dynamics.py --plot
 
 # Step 3: ROI Analysis (requires subject-specific masks)
 python pulseflow_03_roi.py --roi amygdala --hemisphere left
 
 # Step 4: Group Analysis & Publication Outputs
 python pulseflow_04_stats.py
+
+# Alternative: Create plots only (if analysis already completed)
+python pulseflow_02_dynamics.py --plot_only --plot_format pdf
 ```
 
 ## Pipeline Components
@@ -146,6 +149,7 @@ python pulseflow_04_stats.py
 - TENT basis functions for temporal dynamics modeling
 - Group-level statistical comparisons
 - Contrast generation for threat processing conditions
+- **Comprehensive visualization** with brain maps, time series, and group comparisons
 
 ### `pulseflow_03_roi.py`
 - ROI-based activation extraction
@@ -173,12 +177,100 @@ processed_data/roi_analysis/subject_masks/
 processed_data/
 ├── glm_results/           # GLM analysis outputs
 ├── sustained_phasic_analysis/  # Sustained/phasic responses
+│   ├── plots/             # Visualization plots
+│   │   ├── brain_maps/    # Brain activation maps
+│   │   ├── time_series/   # Temporal response plots
+│   │   └── group_comparisons/ # Group comparison plots
+│   └── group_analysis/    # Group-level results
 ├── roi_analysis/          # ROI extraction results
 └── publication_outputs/   # Publication-ready tables & figures
     ├── figures/           # High-quality visualizations
     ├── tables/            # Statistical results
     └── GROUP_ANALYSIS_REPORT.md
 ```
+
+## Visualization and Plotting
+
+### Plotting Functionality
+
+The `pulseflow_02_dynamics.py` script includes comprehensive visualization capabilities for creating publication-quality plots:
+
+#### **Command Line Options for Plotting:**
+
+```bash
+# Create plots only (skip analysis)
+python pulseflow_02_dynamics.py --plot_only
+
+# Create plots with specific format and resolution
+python pulseflow_02_dynamics.py --plot_only --plot_format pdf --plot_dpi 300
+
+# Run analysis and create plots
+python pulseflow_02_dynamics.py --plot
+
+# Run group analysis and create plots
+python pulseflow_02_dynamics.py --group_only --plot
+
+# Process single subject and create plots
+python pulseflow_02_dynamics.py --subject sub-ALC2001 --plot
+```
+
+#### **Plotting Arguments:**
+
+| Argument | Description | Options | Default |
+|----------|-------------|---------|---------|
+| `--plot` | Enable plotting functionality | `True/False` | `False` |
+| `--plot_format` | Output format for plots | `png`, `pdf`, `svg` | `png` |
+| `--plot_dpi` | Resolution (dots per inch) | `100-600` | `300` |
+| `--plot_only` | Create plots only (skip analysis) | `True/False` | `False` |
+
+#### **Types of Plots Generated:**
+
+1. **Brain Map Visualizations** (6 plots)
+   - Uses AFNI's `@chauffeur_afni` for professional brain maps
+   - Red-blue color scheme with statistical thresholds
+   - Fallback info plots when brain templates unavailable
+   - One plot per contrast (sustained/phasic × 3 contrasts)
+
+2. **Time Series Comparison Plots** (7 plots)
+   - Compares sustained (0-20s) vs phasic (0-14s) responses
+   - Separate plots for each condition:
+     - `FearCue_time_series.png`
+     - `NeutralCue_time_series.png`
+     - `FearImage_time_series.png`
+     - `NeutralImage_time_series.png`
+     - `UnknownCue_time_series.png`
+     - `UnknownFear_time_series.png`
+     - `UnknownNeutral_time_series.png`
+
+3. **Group Comparison Summary Plots** (2 plots)
+   - `group_comparison_summary.png` - All 6 contrasts (AUD vs HC)
+   - `response_type_comparison.png` - Sustained vs Phasic comparison
+
+#### **Example Usage:**
+
+```bash
+# Create high-resolution PDF plots for publication
+python pulseflow_02_dynamics.py --plot_only --plot_format pdf --plot_dpi 600
+
+# Create PNG plots for presentations
+python pulseflow_02_dynamics.py --plot_only --plot_format png --plot_dpi 300
+
+# Run complete analysis with plots
+python pulseflow_02_dynamics.py --plot --plot_format svg
+```
+
+#### **Plot Output Location:**
+
+All plots are saved to: `processed_data/sustained_phasic_analysis/plots/`
+
+#### **Plot Features:**
+
+- ✅ **High Resolution** (300 DPI default, up to 600 DPI)
+- ✅ **Professional Styling** (seaborn theme with custom colors)
+- ✅ **Multiple Formats** (PNG, PDF, SVG)
+- ✅ **Error Handling** (fallback plots for brain maps)
+- ✅ **Publication Ready** (vector formats for scaling)
+- ✅ **Comprehensive Coverage** (all analysis aspects)
 
 ## System Requirements Summary
 
