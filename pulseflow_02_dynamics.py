@@ -6,18 +6,8 @@ import argparse
 from pathlib import Path
 import subprocess
 import logging
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from rich.console import Console
 from rich.logging import RichHandler
-
-# Set up matplotlib for non-interactive backend
-plt.switch_backend('Agg')
-
-# Set style for better-looking plots
-plt.style.use('seaborn-v0_8')
-sns.set_palette("husl")
 
 
 class SustainedPhasicAnalyzer:
@@ -513,14 +503,14 @@ class SustainedPhasicAnalyzer:
         
         return None
 
-    def plot_brain_maps(self, output_format='png', dpi=300):
-        """Create brain map visualizations for group analysis results."""
+    def convert_results_to_nifti(self):
+        """Convert all AFNI group analysis results to NIfTI format for inspection."""
         
-        self.logger.info(f"Creating brain map plots (format: {output_format})")
+        self.logger.info("Converting AFNI group analysis results to NIfTI format")
         
-        # Create plots directory
-        plots_dir = self.sustained_phasic_dir / "plots"
-        plots_dir.mkdir(exist_ok=True)
+        # Create NIfTI directory
+        nifti_dir = self.sustained_phasic_dir / "nifti_results"
+        nifti_dir.mkdir(exist_ok=True)
         
         # Get group analysis results
         group_results_file = self.sustained_phasic_dir / "group_analysis" / "group_analysis_results.json"
@@ -532,165 +522,62 @@ class SustainedPhasicAnalyzer:
         with open(group_results_file, 'r') as f:
             group_results = json.load(f)
         
-        # Create brain maps for each response type and contrast
+        # Convert each result file to NIfTI
+        converted_files = []
         for response_type, contrasts in group_results.items():
             for contrast_name, contrast_info in contrasts.items():
-                self._create_brain_map_plot(
+                nifti_file = self._convert_afni_to_nifti(
                     contrast_info['file'], 
                     contrast_name, 
                     response_type, 
-                    plots_dir, 
-                    output_format, 
-                    dpi
+                    nifti_dir
                 )
+                if nifti_file:
+                    converted_files.append(nifti_file)
         
-        self.logger.info(f"✓ Brain map plots saved to {plots_dir}")
+        self.logger.info(f"✓ Converted {len(converted_files)} files to NIfTI format")
+        self.logger.info(f"✓ NIfTI files saved to: {nifti_dir}")
+        self.logger.info("You can now inspect these files with FSLeyes or other NIfTI viewers")
+        
+        return converted_files
 
-    def _create_brain_map_plot(self, brain_file, contrast_name, response_type, plots_dir, output_format, dpi):
-        """Create a single brain map plot with statistical visualization."""
-        
-        output_file = plots_dir / f"{contrast_name}_{response_type}_brain_map.{output_format}"
-        
-        # Create a comprehensive brain visualization
-        try:
-            # Extract basic statistics from the brain file
-            cmd_stats = f"3dROIstats -mask /dev/null '{brain_file}'"
-            result = subprocess.run(cmd_stats, shell=True, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                # Create a statistical summary plot
-                self._create_brain_stats_plot(brain_file, contrast_name, response_type, plots_dir, output_format, dpi)
-            else:
-                # Create a more informative fallback plot
-                self._create_enhanced_fallback_plot(brain_file, contrast_name, response_type, plots_dir, output_format, dpi)
-                
-        except Exception as e:
-            self.logger.warning(f"Could not create brain map for {contrast_name}: {e}")
-            # Create enhanced fallback plot
-            self._create_enhanced_fallback_plot(brain_file, contrast_name, response_type, plots_dir, output_format, dpi)
 
-    def _create_brain_stats_plot(self, brain_file, contrast_name, response_type, plots_dir, output_format, dpi):
-        """Create a statistical summary plot for brain activation."""
-        
-        output_file = plots_dir / f"{contrast_name}_{response_type}_brain_stats.{output_format}"
-        
-        # Create a statistical summary visualization
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        
-        # Left panel: Contrast information
-        ax1.text(0.5, 0.8, f"Contrast: {contrast_name}", 
-                ha='center', va='center', fontsize=14, fontweight='bold')
-        ax1.text(0.5, 0.6, f"Response Type: {response_type}", 
-                ha='center', va='center', fontsize=12)
-        ax1.text(0.5, 0.4, f"Brain File: {Path(brain_file).name}", 
-                ha='center', va='center', fontsize=10, style='italic')
-        ax1.text(0.5, 0.2, "AUD vs HC Group Comparison", 
-                ha='center', va='center', fontsize=11, color='blue')
-        
-        ax1.set_xlim(0, 1)
-        ax1.set_ylim(0, 1)
-        ax1.axis('off')
-        ax1.set_title('Brain Activation Analysis', fontweight='bold')
-        
-        # Right panel: Simulated activation pattern
-        # Create a simple heatmap representation
-        data = np.random.randn(20, 20) * 0.5  # Simulated activation data
-        im = ax2.imshow(data, cmap='RdBu_r', aspect='auto')
-        ax2.set_title('Activation Pattern (Simulated)', fontweight='bold')
-        ax2.set_xlabel('X Coordinate')
-        ax2.set_ylabel('Y Coordinate')
-        
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax2, shrink=0.8)
-        cbar.set_label('Activation (t-stat)')
-        
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created brain stats plot: {output_file.name}")
 
-    def _create_enhanced_fallback_plot(self, brain_file, contrast_name, response_type, plots_dir, output_format, dpi):
-        """Create an enhanced fallback plot with more information."""
+    def _convert_afni_to_nifti(self, afni_file, contrast_name, response_type, output_dir):
+        """Convert AFNI file to NIfTI format, extracting the t-stat sub-brick."""
         
-        # Create clearer filename
+        # Clean up the contrast name for filename
         clean_contrast_name = self._clean_contrast_name(contrast_name)
-        output_file = plots_dir / f"{clean_contrast_name}_{response_type}_group_comparison.{output_format}"
         
-        # Create a comprehensive visualization
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-        fig.suptitle(f'Group Comparison: {clean_contrast_name} ({response_type})', fontsize=16, fontweight='bold')
+        # Create meaningful filename
+        nifti_filename = f"{clean_contrast_name}_{response_type}_AUD_vs_HC.nii.gz"
+        nifti_file = output_dir / nifti_filename
         
-        # Panel 1: Contrast Information
-        ax1.text(0.5, 0.8, f"Contrast: {clean_contrast_name}", 
-                ha='center', va='center', fontsize=14, fontweight='bold')
-        ax1.text(0.5, 0.6, f"Response Type: {response_type}", 
-                ha='center', va='center', fontsize=12)
-        ax1.text(0.5, 0.4, "AUD vs HC Group Comparison", 
-                ha='center', va='center', fontsize=11, color='blue')
-        ax1.text(0.5, 0.2, f"File: {Path(brain_file).name}", 
-                ha='center', va='center', fontsize=10, style='italic')
+        # Extract the t-statistic sub-brick (usually sub-brick 1) for meaningful brain maps
+        cmd = f"3dAFNItoNIFTI -prefix {nifti_file} '{afni_file}[1]'"
         
-        ax1.set_xlim(0, 1)
-        ax1.set_ylim(0, 1)
-        ax1.axis('off')
-        ax1.set_title('Analysis Information', fontweight='bold')
-        
-        # Panel 2: Group Comparison Bar Chart
-        groups = ['AUD', 'HC']
-        # Simulated effect sizes (in real implementation, extract from brain file)
-        effect_sizes = [1.2, 0.8]  # Placeholder values
-        colors = ['red', 'blue']
-        
-        bars = ax2.bar(groups, effect_sizes, color=colors, alpha=0.7)
-        ax2.set_title('Group Effect Sizes', fontweight='bold')
-        ax2.set_ylabel('Effect Size')
-        ax2.grid(True, alpha=0.3)
-        
-        # Add value labels on bars
-        for bar, value in zip(bars, effect_sizes):
-            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{value:.2f}', ha='center', va='bottom', fontweight='bold')
-        
-        # Panel 3: Effect Size Distribution
-        # Simulate individual subject data
-        aud_data = np.random.normal(1.2, 0.3, 6)  # 6 AUD subjects
-        hc_data = np.random.normal(0.8, 0.3, 6)   # 6 HC subjects
-        
-        ax3.hist(aud_data, bins=10, alpha=0.6, color='red', label='AUD', density=True)
-        ax3.hist(hc_data, bins=10, alpha=0.6, color='blue', label='HC', density=True)
-        ax3.set_title('Effect Size Distribution', fontweight='bold')
-        ax3.set_xlabel('Effect Size')
-        ax3.set_ylabel('Density')
-        ax3.legend()
-        ax3.grid(True, alpha=0.3)
-        
-        # Panel 4: Statistical Summary
-        # Calculate some basic stats
-        aud_mean = np.mean(aud_data)
-        hc_mean = np.mean(hc_data)
-        effect_diff = aud_mean - hc_mean
-        
-        ax4.text(0.5, 0.8, f"AUD Mean: {aud_mean:.3f}", 
-                ha='center', va='center', fontsize=12, color='red')
-        ax4.text(0.5, 0.6, f"HC Mean: {hc_mean:.3f}", 
-                ha='center', va='center', fontsize=12, color='blue')
-        ax4.text(0.5, 0.4, f"Difference: {effect_diff:.3f}", 
-                ha='center', va='center', fontsize=12, fontweight='bold')
-        ax4.text(0.5, 0.2, f"p < 0.05: {'Yes' if abs(effect_diff) > 0.5 else 'No'}", 
-                ha='center', va='center', fontsize=12, 
-                color='green' if abs(effect_diff) > 0.5 else 'orange')
-        
-        ax4.set_xlim(0, 1)
-        ax4.set_ylim(0, 1)
-        ax4.axis('off')
-        ax4.set_title('Statistical Summary', fontweight='bold')
-        
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created group comparison plot: {output_file.name}")
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode == 0 and nifti_file.exists():
+                self.logger.info(f"✓ Converted to NIfTI (t-stat): {nifti_filename}")
+                return nifti_file
+            else:
+                # Try with sub-brick 0 as fallback
+                cmd_fallback = f"3dAFNItoNIFTI -prefix {nifti_file} '{afni_file}[0]'"
+                result = subprocess.run(cmd_fallback, shell=True, capture_output=True, text=True)
+                if result.returncode == 0 and nifti_file.exists():
+                    self.logger.info(f"✓ Converted to NIfTI (fallback): {nifti_filename}")
+                    return nifti_file
+                else:
+                    self.logger.warning(f"Failed to convert {afni_file} to NIfTI")
+                    return None
+        except Exception as e:
+            self.logger.warning(f"Error converting {afni_file} to NIfTI: {e}")
+            return None
+
+
+
+
 
     def _clean_contrast_name(self, contrast_name):
         """Clean contrast name for better filenames."""
@@ -709,409 +596,39 @@ class SustainedPhasicAnalyzer:
         
         return name_mapping.get(clean_name, clean_name)
 
-    def _create_fallback_plot(self, contrast_name, response_type, plots_dir, output_format, dpi):
-        """Create a fallback plot when brain visualization fails."""
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Create a simple info plot
-        ax.text(0.5, 0.7, f"Contrast: {contrast_name}", 
-                ha='center', va='center', fontsize=16, fontweight='bold')
-        ax.text(0.5, 0.5, f"Response Type: {response_type}", 
-                ha='center', va='center', fontsize=14)
-        ax.text(0.5, 0.3, "Brain map visualization\nrequires AFNI template", 
-                ha='center', va='center', fontsize=12, style='italic')
-        
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.axis('off')
-        
-        output_file = plots_dir / f"{contrast_name}_{response_type}_info.{output_format}"
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created info plot: {output_file.name}")
 
-    def plot_time_series_comparison(self, output_format='png', dpi=300):
-        """Create time series plots comparing sustained vs phasic responses."""
-        
-        self.logger.info(f"Creating time series comparison plots (format: {output_format})")
-        
-        # Create plots directory
-        plots_dir = self.sustained_phasic_dir / "plots"
-        plots_dir.mkdir(exist_ok=True)
-        
-        # Define time points for sustained (0-20s) and phasic (0-14s) responses
-        sustained_time = np.linspace(0, 20, 11)  # 11 TENT functions
-        phasic_time = np.linspace(0, 14, 8)      # 8 TENT functions
-        
-        # Create comparison plots for each condition with all subjects
-        for condition in self.conditions:
-            self._create_time_series_plot_all_subjects(
-                condition, sustained_time, phasic_time, plots_dir, output_format, dpi
-            )
-        
-        self.logger.info(f"✓ Time series plots saved to {plots_dir}")
-
-    def _extract_tent_coefficients(self, subject_id, condition, tent_range):
-        """Extract TENT coefficients for a specific condition and subject."""
-        
-        glm_file = self.output_dir / "glm_results" / subject_id / f"{subject_id}_glm+orig"
-        coefficients = []
-        
-        for tent_idx in tent_range:
-            subbrick = f'{condition}#{tent_idx}_Coef'
-            
-            # Use 3dROIstats to extract mean coefficient value
-            cmd = f"3dROIstats -mask /dev/null '{glm_file}[{subbrick}]'"
-            
-            try:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    # Parse the output to get the mean value
-                    lines = result.stdout.strip().split('\n')
-                    if len(lines) > 1:  # Skip header line
-                        value_line = lines[1]
-                        try:
-                            # Extract the mean value (usually the second column)
-                            mean_value = float(value_line.split()[1])
-                            coefficients.append(mean_value)
-                        except (IndexError, ValueError):
-                            coefficients.append(0.0)
-                else:
-                    coefficients.append(0.0)
-            except Exception:
-                coefficients.append(0.0)
-        
-        return coefficients
-
-    def _create_time_series_plot_all_subjects(self, condition, sustained_time, phasic_time, plots_dir, output_format, dpi):
-        """Create time series plot for a specific condition with all subjects."""
-        
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
-        
-        # Collect data for all subjects
-        all_subjects = self.test_groups['AUD'] + self.test_groups['HC']
-        aud_subjects = self.test_groups['AUD']
-        hc_subjects = self.test_groups['HC']
-        
-        # Plot sustained response for all subjects
-        for subject in all_subjects:
-            sustained_coeffs = self._extract_tent_coefficients(subject, condition, range(11))
-            
-            # Determine color and style based on group
-            if subject in aud_subjects:
-                color = 'red'
-                alpha = 0.6
-                label = f'AUD ({subject})' if subject == aud_subjects[0] else None
-            else:
-                color = 'blue'
-                alpha = 0.6
-                label = f'HC ({subject})' if subject == hc_subjects[0] else None
-            
-            ax1.plot(sustained_time, sustained_coeffs, color=color, alpha=alpha, linewidth=1.5, label=label)
-        
-        # Add mean lines
-        aud_sustained_data = []
-        hc_sustained_data = []
-        
-        for subject in aud_subjects:
-            coeffs = self._extract_tent_coefficients(subject, condition, range(11))
-            aud_sustained_data.append(coeffs)
-        
-        for subject in hc_subjects:
-            coeffs = self._extract_tent_coefficients(subject, condition, range(11))
-            hc_sustained_data.append(coeffs)
-        
-        if aud_sustained_data and hc_sustained_data:
-            aud_mean = np.mean(aud_sustained_data, axis=0)
-            hc_mean = np.mean(hc_sustained_data, axis=0)
-            
-            ax1.plot(sustained_time, aud_mean, 'red', linewidth=3, label='AUD Mean', alpha=0.8)
-            ax1.plot(sustained_time, hc_mean, 'blue', linewidth=3, label='HC Mean', alpha=0.8)
-        
-        ax1.set_title(f'{condition} - Sustained Response (0-20s)\nAll Subjects', fontsize=14, fontweight='bold')
-        ax1.set_xlabel('Time (seconds)')
-        ax1.set_ylabel('TENT Coefficient Value')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        ax1.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-        
-        # Plot phasic response for all subjects
-        for subject in all_subjects:
-            phasic_coeffs = self._extract_tent_coefficients(subject, condition, range(8))
-            
-            # Determine color and style based on group
-            if subject in aud_subjects:
-                color = 'red'
-                alpha = 0.6
-                label = f'AUD ({subject})' if subject == aud_subjects[0] else None
-            else:
-                color = 'blue'
-                alpha = 0.6
-                label = f'HC ({subject})' if subject == hc_subjects[0] else None
-            
-            ax2.plot(phasic_time, phasic_coeffs, color=color, alpha=alpha, linewidth=1.5, label=label)
-        
-        # Add mean lines for phasic
-        aud_phasic_data = []
-        hc_phasic_data = []
-        
-        for subject in aud_subjects:
-            coeffs = self._extract_tent_coefficients(subject, condition, range(8))
-            aud_phasic_data.append(coeffs)
-        
-        for subject in hc_subjects:
-            coeffs = self._extract_tent_coefficients(subject, condition, range(8))
-            hc_phasic_data.append(coeffs)
-        
-        if aud_phasic_data and hc_phasic_data:
-            aud_mean = np.mean(aud_phasic_data, axis=0)
-            hc_mean = np.mean(hc_phasic_data, axis=0)
-            
-            ax2.plot(phasic_time, aud_mean, 'red', linewidth=3, label='AUD Mean', alpha=0.8)
-            ax2.plot(phasic_time, hc_mean, 'blue', linewidth=3, label='HC Mean', alpha=0.8)
-        
-        ax2.set_title(f'{condition} - Phasic Response (0-14s)\nAll Subjects', fontsize=14, fontweight='bold')
-        ax2.set_xlabel('Time (seconds)')
-        ax2.set_ylabel('TENT Coefficient Value')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-        
-        plt.tight_layout()
-        
-        output_file = plots_dir / f"{condition}_all_subjects_time_series.{output_format}"
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created time series plot for all subjects: {output_file.name}")
-
-    def _create_time_series_plot(self, condition, sustained_time, phasic_time, sample_subject, plots_dir, output_format, dpi):
-        """Create time series plot for a specific condition with actual TENT coefficients."""
-        
-        # Extract actual TENT coefficients
-        sustained_coeffs = self._extract_tent_coefficients(sample_subject, condition, range(11))
-        phasic_coeffs = self._extract_tent_coefficients(sample_subject, condition, range(8))
-        
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-        
-        # Plot sustained response with actual data
-        ax1.plot(sustained_time, sustained_coeffs, 'b-o', linewidth=2, markersize=6, label='Sustained Response')
-        ax1.fill_between(sustained_time, sustained_coeffs, alpha=0.3, color='blue')
-        ax1.set_title(f'{condition} - Sustained Response (0-20s)\nSubject: {sample_subject}', fontsize=14, fontweight='bold')
-        ax1.set_xlabel('Time (seconds)')
-        ax1.set_ylabel('TENT Coefficient Value')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # Add horizontal line at zero for reference
-        ax1.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-        
-        # Plot phasic response with actual data
-        ax2.plot(phasic_time, phasic_coeffs, 'r-o', linewidth=2, markersize=6, label='Phasic Response')
-        ax2.plot(phasic_time, phasic_coeffs, 'r-o', linewidth=2, markersize=6, label='Phasic Response')
-        ax2.fill_between(phasic_time, phasic_coeffs, alpha=0.3, color='red')
-        ax2.set_title(f'{condition} - Phasic Response (0-14s)\nSubject: {sample_subject}', fontsize=14, fontweight='bold')
-        ax2.set_xlabel('Time (seconds)')
-        ax2.set_ylabel('TENT Coefficient Value')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        # Add horizontal line at zero for reference
-        ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-        
-        plt.tight_layout()
-        
-        output_file = plots_dir / f"{condition}_time_series.{output_format}"
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created time series plot: {output_file.name}")
-
-    def plot_group_comparison_summary(self, output_format='png', dpi=300):
-        """Create summary plots comparing AUD vs HC groups."""
-        
-        self.logger.info(f"Creating group comparison summary plots (format: {output_format})")
-        
-        # Create plots directory
-        plots_dir = self.sustained_phasic_dir / "plots"
-        plots_dir.mkdir(exist_ok=True)
-        
-        # Get group analysis results
-        group_results_file = self.sustained_phasic_dir / "group_analysis" / "group_analysis_results.json"
-        
-        if not group_results_file.exists():
-            self.logger.error("Group analysis results not found. Run group analysis first.")
-            return
-        
-        with open(group_results_file, 'r') as f:
-            group_results = json.load(f)
-        
-        # Create summary plots
-        self._create_contrast_summary_plot(group_results, plots_dir, output_format, dpi)
-        self._create_response_type_comparison_plot(group_results, plots_dir, output_format, dpi)
-        
-        self.logger.info(f"✓ Group comparison plots saved to {plots_dir}")
-
-    def _create_contrast_summary_plot(self, group_results, plots_dir, output_format, dpi):
-        """Create a summary plot showing all contrasts."""
-        
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle('AUD vs HC Group Comparisons - All Contrasts', fontsize=16, fontweight='bold')
-        
-        # Flatten axes for easier indexing
-        axes = axes.flatten()
-        
-        contrast_idx = 0
-        for response_type, contrasts in group_results.items():
-            for contrast_name, contrast_info in contrasts.items():
-                if contrast_idx < 6:  # We have 6 total contrasts
-                    ax = axes[contrast_idx]
-                    
-                    # Create a simple bar plot representation
-                    categories = ['AUD', 'HC']
-                    # Placeholder values - in real implementation, you'd extract actual statistics
-                    values = [1.0, 0.8]  # Placeholder
-                    
-                    bars = ax.bar(categories, values, color=['#ff7f0e', '#1f77b4'], alpha=0.7)
-                    ax.set_title(f'{contrast_name}\n({response_type})', fontsize=10)
-                    ax.set_ylabel('Effect Size')
-                    ax.grid(True, alpha=0.3)
-                    
-                    # Add value labels on bars
-                    for bar, value in zip(bars, values):
-                        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                               f'{value:.2f}', ha='center', va='bottom')
-                    
-                    contrast_idx += 1
-        
-        # Hide unused subplots
-        for i in range(contrast_idx, 6):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        
-        output_file = plots_dir / f"group_comparison_summary.{output_format}"
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created contrast summary plot: {output_file.name}")
-
-    def _create_response_type_comparison_plot(self, group_results, plots_dir, output_format, dpi):
-        """Create a comparison plot between sustained and phasic responses."""
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-        
-        # Sustained vs Phasic comparison for each contrast type
-        contrast_types = ['Fear_vs_Neutral', 'Phasic_vs_Sustained_Threat', 'UnknownFear_vs_UnknownNeutral']
-        
-        for i, contrast_type in enumerate(contrast_types):
-            sustained_data = []
-            phasic_data = []
-            
-            for response_type, contrasts in group_results.items():
-                for contrast_name, contrast_info in contrasts.items():
-                    if contrast_type in contrast_name:
-                        # Placeholder values - in real implementation, extract actual statistics
-                        if response_type == 'sustained':
-                            sustained_data.append(1.0)  # Placeholder
-                        else:
-                            phasic_data.append(0.8)     # Placeholder
-            
-            # Create comparison bars
-            x = np.arange(len(contrast_types))
-            width = 0.35
-            
-            if i == 0:  # First subplot
-                ax1.bar(x - width/2, [1.0, 0.9, 0.7], width, label='Sustained', alpha=0.7)
-                ax1.bar(x + width/2, [0.8, 0.7, 0.6], width, label='Phasic', alpha=0.7)
-                ax1.set_title('Sustained vs Phasic Response Comparison', fontweight='bold')
-                ax1.set_ylabel('Effect Size')
-                ax1.set_xticks(x)
-                ax1.set_xticklabels([ct.replace('_', '\n') for ct in contrast_types], rotation=45)
-                ax1.legend()
-                ax1.grid(True, alpha=0.3)
-        
-        # Second subplot for response type differences
-        response_types = ['Sustained', 'Phasic']
-        aud_values = [0.9, 0.7]  # Placeholder
-        hc_values = [0.8, 0.6]   # Placeholder
-        
-        x = np.arange(len(response_types))
-        ax2.bar(x - width/2, aud_values, width, label='AUD', alpha=0.7)
-        ax2.bar(x + width/2, hc_values, width, label='HC', alpha=0.7)
-        ax2.set_title('Group Differences by Response Type', fontweight='bold')
-        ax2.set_ylabel('Effect Size')
-        ax2.set_xticks(x)
-        ax2.set_xticklabels(response_types)
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        output_file = plots_dir / f"response_type_comparison.{output_format}"
-        plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
-        plt.close()
-        
-        self.logger.info(f"✓ Created response type comparison plot: {output_file.name}")
-
-    def create_all_plots(self, output_format='png', dpi=300):
-        """Create all visualization plots for the analysis."""
-        
-        self.logger.info(f"Creating all visualization plots (format: {output_format}, dpi: {dpi})")
-        
-        # Create brain maps
-        self.plot_brain_maps(output_format, dpi)
-        
-        # Create time series plots
-        self.plot_time_series_comparison(output_format, dpi)
-        
-        # Create group comparison plots
-        self.plot_group_comparison_summary(output_format, dpi)
-        
-        self.logger.info("✓ All plots created successfully!")
-        
-        # Print summary
-        plots_dir = self.sustained_phasic_dir / "plots"
-        if plots_dir.exists():
-            plot_files = list(plots_dir.glob(f"*.{output_format}"))
-            self.logger.info(f"Total plots created: {len(plot_files)}")
-            self.logger.info(f"Plots saved to: {plots_dir}")
 
 def main():
     parser = argparse.ArgumentParser(description="Sustained vs Phasic Response Analysis")
     parser.add_argument("--output_dir", default="processed_data", help="Output directory")
     parser.add_argument("--subject", help="Process specific subject only")
     parser.add_argument("--group_only", action="store_true", help="Run group analysis only")
-    parser.add_argument("--plot", action="store_true", help="Create visualization plots")
-    parser.add_argument("--plot_format", default="png", choices=["png", "pdf", "svg"], help="Plot output format")
-    parser.add_argument("--plot_dpi", type=int, default=300, help="Plot resolution (DPI)")
-    parser.add_argument("--plot_only", action="store_true", help="Create plots only (skip analysis)")
+    parser.add_argument("--convert_nifti", action="store_true", help="Convert AFNI results to NIfTI format")
+    parser.add_argument("--nifti_only", action="store_true", help="Convert to NIfTI only (skip analysis)")
     
     args = parser.parse_args()
     
     # Initialize analyzer
     analyzer = SustainedPhasicAnalyzer(args.output_dir)
     
-    if args.plot_only:
-        # Create plots only
-        analyzer.create_all_plots(args.plot_format, args.plot_dpi)
+    if args.nifti_only:
+        # Convert to NIfTI only
+        analyzer.convert_results_to_nifti()
     elif args.subject:
         # Process single subject
         analyzer.analyze_subject(args.subject)
-        if args.plot:
-            analyzer.create_all_plots(args.plot_format, args.plot_dpi)
+        if args.convert_nifti:
+            analyzer.convert_results_to_nifti()
     elif args.group_only:
         # Run group analysis only
         analyzer.run_group_analyses()
-        if args.plot:
-            analyzer.create_all_plots(args.plot_format, args.plot_dpi)
+        if args.convert_nifti:
+            analyzer.convert_results_to_nifti()
     else:
         # Run complete analysis
         analyzer.run_complete_analysis()
-        if args.plot:
-            analyzer.create_all_plots(args.plot_format, args.plot_dpi)
+        if args.convert_nifti:
+            analyzer.convert_results_to_nifti()
 
 if __name__ == "__main__":
     main() 

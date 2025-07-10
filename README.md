@@ -81,10 +81,7 @@ pip install -r requirements.txt
 pandas>=1.3.0          # Data manipulation and analysis
 numpy>=1.20.0          # Numerical computing
 rich>=10.0.0           # Rich text and beautiful formatting
-matplotlib>=3.5.0      # Plotting and visualization
-seaborn>=0.11.0        # Statistical data visualization
 scipy>=1.7.0           # Scientific computing
-nibabel>=3.2.0         # Neuroimaging data I/O
 ```
 
 ### 3. Verify Installation
@@ -94,7 +91,7 @@ nibabel>=3.2.0         # Neuroimaging data I/O
 3dinfo -help
 
 # Test Python environment
-python3 -c "import pandas, numpy, nibabel, matplotlib, seaborn, scipy; print('All Python dependencies installed successfully!')"
+python3 -c "import pandas, numpy, scipy; print('All Python dependencies installed successfully!')"
 ```
 
 ## Quick Start
@@ -119,8 +116,8 @@ python pulseflow_00_setup.py --add sub-ALC2161 HC
 # Step 1: Preprocessing
 python pulseflow_01_preprocess.py
 
-# Step 2: Sustained/Phasic Analysis (with plots)
-python pulseflow_02_dynamics.py --plot
+# Step 2: Sustained/Phasic Analysis (with NIfTI conversion)
+python pulseflow_02_dynamics.py --convert_nifti
 
 # Step 3: ROI Analysis (requires subject-specific masks)
 python pulseflow_03_roi.py --roi amygdala --hemisphere left
@@ -128,8 +125,8 @@ python pulseflow_03_roi.py --roi amygdala --hemisphere left
 # Step 4: Group Analysis & Publication Outputs
 python pulseflow_04_stats.py
 
-# Alternative: Create plots only (if analysis already completed)
-python pulseflow_02_dynamics.py --plot_only --plot_format pdf
+# Alternative: Convert to NIfTI only (if analysis already completed)
+python pulseflow_02_dynamics.py --nifti_only
 ```
 
 ## Pipeline Components
@@ -149,7 +146,7 @@ python pulseflow_02_dynamics.py --plot_only --plot_format pdf
 - TENT basis functions for temporal dynamics modeling
 - Group-level statistical comparisons
 - Contrast generation for threat processing conditions
-- **Comprehensive visualization** with brain maps, time series, and group comparisons
+- **NIfTI conversion** for brain map inspection with FSLeyes
 
 ### `pulseflow_03_roi.py`
 - ROI-based activation extraction
@@ -177,10 +174,7 @@ processed_data/roi_analysis/subject_masks/
 processed_data/
 ├── glm_results/           # GLM analysis outputs
 ├── sustained_phasic_analysis/  # Sustained/phasic responses
-│   ├── plots/             # Visualization plots
-│   │   ├── brain_maps/    # Brain activation maps
-│   │   ├── time_series/   # Temporal response plots
-│   │   └── group_comparisons/ # Group comparison plots
+│   ├── nifti_results/     # NIfTI files for FSLeyes inspection
 │   └── group_analysis/    # Group-level results
 ├── roi_analysis/          # ROI extraction results
 └── publication_outputs/   # Publication-ready tables & figures
@@ -189,88 +183,67 @@ processed_data/
     └── GROUP_ANALYSIS_REPORT.md
 ```
 
-## Visualization and Plotting
+## NIfTI Conversion and Brain Map Inspection
 
-### Plotting Functionality
+### NIfTI Conversion Functionality
 
-The `pulseflow_02_dynamics.py` script includes comprehensive visualization capabilities for creating publication-quality plots:
+The `pulseflow_02_dynamics.py` script converts AFNI group analysis results to NIfTI format for easy inspection with neuroimaging viewers like FSLeyes:
 
-#### **Command Line Options for Plotting:**
-
-```bash
-# Create plots only (skip analysis)
-python pulseflow_02_dynamics.py --plot_only
-
-# Create plots with specific format and resolution
-python pulseflow_02_dynamics.py --plot_only --plot_format pdf --plot_dpi 300
-
-# Run analysis and create plots
-python pulseflow_02_dynamics.py --plot
-
-# Run group analysis and create plots
-python pulseflow_02_dynamics.py --group_only --plot
-
-# Process single subject and create plots
-python pulseflow_02_dynamics.py --subject sub-ALC2001 --plot
-```
-
-#### **Plotting Arguments:**
-
-| Argument | Description | Options | Default |
-|----------|-------------|---------|---------|
-| `--plot` | Enable plotting functionality | `True/False` | `False` |
-| `--plot_format` | Output format for plots | `png`, `pdf`, `svg` | `png` |
-| `--plot_dpi` | Resolution (dots per inch) | `100-600` | `300` |
-| `--plot_only` | Create plots only (skip analysis) | `True/False` | `False` |
-
-#### **Types of Plots Generated:**
-
-1. **Brain Map Visualizations** (6 plots)
-   - Uses AFNI's `@chauffeur_afni` for professional brain maps
-   - Red-blue color scheme with statistical thresholds
-   - Fallback info plots when brain templates unavailable
-   - One plot per contrast (sustained/phasic × 3 contrasts)
-
-2. **Time Series Comparison Plots** (7 plots)
-   - Compares sustained (0-20s) vs phasic (0-14s) responses
-   - Separate plots for each condition:
-     - `FearCue_time_series.png`
-     - `NeutralCue_time_series.png`
-     - `FearImage_time_series.png`
-     - `NeutralImage_time_series.png`
-     - `UnknownCue_time_series.png`
-     - `UnknownFear_time_series.png`
-     - `UnknownNeutral_time_series.png`
-
-3. **Group Comparison Summary Plots** (2 plots)
-   - `group_comparison_summary.png` - All 6 contrasts (AUD vs HC)
-   - `response_type_comparison.png` - Sustained vs Phasic comparison
-
-#### **Example Usage:**
+#### **Command Line Options:**
 
 ```bash
-# Create high-resolution PDF plots for publication
-python pulseflow_02_dynamics.py --plot_only --plot_format pdf --plot_dpi 600
+# Run analysis and convert to NIfTI
+python pulseflow_02_dynamics.py --convert_nifti
 
-# Create PNG plots for presentations
-python pulseflow_02_dynamics.py --plot_only --plot_format png --plot_dpi 300
+# Convert existing results to NIfTI only
+python pulseflow_02_dynamics.py --nifti_only
 
-# Run complete analysis with plots
-python pulseflow_02_dynamics.py --plot --plot_format svg
+# Run group analysis only (without individual subject analysis)
+python pulseflow_02_dynamics.py --group_only --convert_nifti
 ```
 
-#### **Plot Output Location:**
+#### **NIfTI Files Generated:**
 
-All plots are saved to: `processed_data/sustained_phasic_analysis/plots/`
+The conversion creates 6 NIfTI files, one for each contrast:
 
-#### **Plot Features:**
+**Sustained Response Contrasts:**
+- `Fear_vs_Neutral_sustained_AUD_vs_HC.nii.gz`
+- `Predictable_vs_Unknown_sustained_AUD_vs_HC.nii.gz` 
+- `Unknown_Fear_vs_Neutral_sustained_AUD_vs_HC.nii.gz`
 
-- ✅ **High Resolution** (300 DPI default, up to 600 DPI)
-- ✅ **Professional Styling** (seaborn theme with custom colors)
-- ✅ **Multiple Formats** (PNG, PDF, SVG)
-- ✅ **Error Handling** (fallback plots for brain maps)
-- ✅ **Publication Ready** (vector formats for scaling)
-- ✅ **Comprehensive Coverage** (all analysis aspects)
+**Phasic Response Contrasts:**
+- `Fear_vs_Neutral_phasic_AUD_vs_HC.nii.gz`
+- `Predictable_vs_Unknown_phasic_AUD_vs_HC.nii.gz`
+- `Unknown_Fear_vs_Neutral_phasic_AUD_vs_HC.nii.gz`
+
+#### **Inspecting Results with FSLeyes:**
+
+```bash
+# Install FSLeyes (if not already installed)
+pip install fsleyes
+
+# Open individual contrast
+fsleyes processed_data/sustained_phasic_analysis/nifti_results/Fear_vs_Neutral_sustained_AUD_vs_HC.nii.gz
+
+# Open all contrasts for comparison
+fsleyes processed_data/sustained_phasic_analysis/nifti_results/*.nii.gz
+```
+
+#### **File Specifications:**
+
+- **Format**: NIfTI-1 compressed (.nii.gz)
+- **Content**: t-statistic maps from group comparisons (AUD vs HC)
+- **Space**: Same as original AFNI analysis space
+- **Size**: ~2.7MB per file
+- **Threshold**: No thresholding applied (raw t-statistics)
+
+#### **Analysis Details:**
+
+Each NIfTI file contains t-statistic values from 3dttest++ group comparisons:
+- **Positive values**: AUD > HC activation
+- **Negative values**: HC > AUD activation  
+- **Zero values**: No group difference
+- **Statistical significance**: Apply appropriate thresholds in FSLeyes (e.g., |t| > 2.0)
 
 ## System Requirements Summary
 
